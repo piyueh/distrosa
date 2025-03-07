@@ -4,13 +4,16 @@
 """Verification case using 1D Gaussian distribution.
 """
 import pathlib
+import itertools
 import math
 import torch
 import numpy
 import scipy.integrate
 from matplotlib import pyplot
+from cycler import cycler
 from distrosa.gradcalc import Sensitivity1D
 from distrosa.gradcalc import SensitivityND
+from distrosa.gradcalc import SensitivityNDDiag
 
 
 pyplot.rcParams.update({
@@ -23,8 +26,11 @@ pyplot.rcParams.update({
     "legend.title_fontsize": "small",
     "figure.dpi": 192,
     "figure.titlesize": "medium",
-    "lines.linewidth": 1.5,
+    "lines.linewidth": 2.0,
 })
+
+# line styles
+linestyles = ["dashdot", "dashed", (0, (1, 1))]
 
 
 def ans(x, params):
@@ -73,20 +79,22 @@ def sensitivity_demo(nv, xmin, xmax, params, eps, calculators, labels, figdir):
         outs[key] = calculator(v)  # sensitivity at vertices
 
     # plot \partial x / \partial \mu
+    lscycler = itertools.cycle(linestyles)
     fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
     ax.plot(v, theo[..., 0], label="Analytical", lw=2, color="k")
     for key, out in outs.items():
-        ax.plot(v, out[..., 0], label=labels[key], alpha=0.85)
+        ax.plot(v, out[..., 0], label=labels[key], alpha=0.85, ls=next(lscycler))
     ax.legend(loc=0)
     ax.set_xlabel(r"$x$")
     ax.set_ylabel(r"$\partial x \slash \partial \mu$")
     fig.savefig(figdir.joinpath("sensitivity_mu.pdf"), dpi=192, bbox_inches="tight")
 
     # plot \partial x / \partial \sigma
+    lscycler = itertools.cycle(linestyles)
     fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
     ax.plot(v, theo[..., 1], label="Analytical", lw=2, color="k")
     for key, out in outs.items():
-        ax.plot(v, out[..., 1], label=labels[key], alpha=0.85)
+        ax.plot(v, out[..., 1], label=labels[key], alpha=0.85, ls=next(lscycler))
     ax.legend(loc=0)
     ax.set_xlabel(r"$x$")
     ax.set_ylabel(r"$\partial x \slash \partial \sigma$")
@@ -104,6 +112,8 @@ def error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir):
 
         for nv in nvs:
 
+            print(nv)
+
             v = torch.linspace(xmin, xmax, nv+1, dtype=torch.float64, device="cpu")
 
             if key == "alg-2":
@@ -111,27 +121,22 @@ def error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir):
             else:
                 calculator = cls(pdf, [v,], params, eps)
 
-            def wrapper_0(x):
-                val1 = calculator(x)[0].item()
-                val2 = ans(x, params)[0].item()
-                w = pdf(x, params).item()
-                return abs(val1-val2) * w
+            mu, sigma = params
+            xint = torch.linspace(
+                mu-3.0*sigma, mu+3.0*sigma, nvs[-1]+1, dtype=torch.float64, device="cpu"
+            )
+            dx = 6.0 * sigma / nvs[-1]
+            vals1 = calculator(xint)
+            vals2 = ans(xint, params)
+            err = torch.abs(vals1-vals2)
+            w = pdf(xint, params)
+            errs_0.setdefault(key, []).append(scipy.integrate.romb(err[:, 0]*w, dx))
+            errs_1.setdefault(key, []).append(scipy.integrate.romb(err[:, 1]*w, dx))
 
-            err = scipy.integrate.quad(wrapper_0, mu-3.0*sigma, mu+3.0*sigma, limit=1000)[0]
-            errs_0.setdefault(key, []).append(err)
-
-            def wrapper_1(x):
-                val1 = calculator(x)[1].item()
-                val2 = ans(x, params)[1].item()
-                w = pdf(x, params).item()
-                return abs(val1-val2) * w
-
-            err = scipy.integrate.quad(wrapper_1, mu-3.0*sigma, mu+3.0*sigma, limit=1000)[0]
-            errs_1.setdefault(key, []).append(err)
-
+    lscycler = itertools.cycle(linestyles)
     fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
     for key, err in errs_0.items():
-        ax.plot(nvs, err, label=labels[key])
+        ax.plot(nvs, err, label=labels[key], ls=next(lscycler))
     ax.grid(True, which="both", zorder=-1, lw=0.5)
     ax.legend(loc=0)
     ax.set_xscale("log")
@@ -140,9 +145,10 @@ def error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir):
     ax.set_ylabel(r"$L_1$ Error of $\partial x \slash \partial \mu$")
     fig.savefig(figdir.joinpath("error_mu.pdf"), dpi=192, bbox_inches="tight")
 
+    lscycler = itertools.cycle(linestyles)
     fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
     for key, err in errs_1.items():
-        ax.plot(nvs, err, label=labels[key])
+        ax.plot(nvs, err, label=labels[key], ls=next(lscycler))
     ax.grid(True, which="both", zorder=-1, lw=0.5)
     ax.legend(loc=0)
     ax.set_xscale("log")
@@ -172,12 +178,14 @@ if __name__ == "__main__":
     labels = {
         "alg-2": "Subroutine 2",
         "alg-3": "Subroutine 3",
+        "alg-4": "Subroutine 4",
     }
 
     # gradient calculator for each algorithm
     calculators = {
         "alg-2": Sensitivity1D,
         "alg-3": SensitivityND,
+        "alg-4": SensitivityNDDiag,
     }
 
     # visualize the sensitivities from all algorithms

@@ -228,3 +228,68 @@ class SensitivityND:
 
         # restore the original shape but do not copy
         return J.view(shape+(self._P,))
+
+
+class SensitivityNDDiag:
+    """Sensitivity/gradient calculator for a N-D distribution w/ diagonal approximation.
+    """
+
+    def __init__(self, func, gridlines, params, eps):
+        self._density = func
+        self._gridlines = [torch.asarray(_) for _ in gridlines]
+        self._params = torch.asarray(params)
+        self._eps = torch.asarray(eps)
+
+        if self._eps.ndim == 0:
+            self._eps = self._eps.expand(self._params.shape)
+        elif self._eps.shape != self._params.shape:
+            raise ValueError("`eps` must be a scalar or array of `params`'s shape")
+
+        # derived attributes
+        self._P = len(params)  # number of parameters\
+        self._N = len(gridlines)  # number of spatial dimensions
+        self._two_eps = 2.0 * self._eps
+
+    def __call__(self, x):
+        """Calculate the gradient at space points.
+
+        Arguments
+        ---------
+        x : N-D array
+            Space points where the gradient is calculated. The last dimension of `x`
+            must be N, which is the number of spatial dimensions.
+
+        Returns
+        -------
+        g : N-D array of shape x.shape + (P,)
+            Gradient values at space points.
+
+        Notes
+        -----
+        * To keep the code simple, we do not check whether the last dimension of `x`
+          is N or not.
+        """
+
+
+
+        x = torch.asarray(x)
+        shape = x.shape  # save the original shape
+        x = x.view(-1, self._N)  # non-copy view
+
+        J = torch.zeros(x.shape+(self._P,), dtype=x.dtype)
+
+        for ix in range(x.shape[0]):
+            for i in range(self._N):
+
+                # local function as a 1D conditional PDF
+                def fi(s, params):
+                    s = torch.asarray(s)
+                    _x = torch.tile(x[ix], s.view(-1, 1).shape)
+                    _x[:, i] = s
+                    return self._density(_x, params).view(s.shape)
+
+                cond = Sensitivity1D(fi, self._gridlines[i], self._params, self._eps)
+                J[ix, i, :] = cond(x[ix, i])
+
+        # restore the original shape but do not copy
+        return J.view(shape+(self._P,))
