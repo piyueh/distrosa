@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distrosa"
+authors = [
+  {name="Ahmed Attia", email="attia@mcs.anl.gov"},
+  {name="Pi-Yueh Chuang", email="pchuang@anl.gov"},
+]
+description = "Distributional space-parameter sensitivity analysis"
+readme = {file="README.md", content-type ="text/markdown"}
+license = {text="NONE"}
+keywords = ["probability", "sensitivity analysis",]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+dynamic = ["dependencies", "version"]
+requires-python = ">=3.10"
+
+[project.urls]
+homepage = "https://gitlab.com/ahmedattia/distributional_sensitivity_analysis"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages]
+find = {}
+
+[tool.setuptools_scm]
+# leave empty here
