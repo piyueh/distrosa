@@ -3,6 +3,7 @@
 
 """Gradient calculators.
 """
+import itertools
 import torch
 from . import misc as _misc
 
@@ -218,7 +219,7 @@ class SensitivityND:
 
             # solve the linear system
             try:
-                J[ix, :, :] = torch.linalg.solve(H, G)
+                torch.linalg.solve(H, G, out=J[ix, :, :])
             except torch._C._LinAlgError as err:  # pyright: ignore
                 # if the matrix is singular, set the gradients to zero
                 if "singular" in str(err):
@@ -270,8 +271,6 @@ class SensitivityNDDiag:
           is N or not.
         """
 
-
-
         x = torch.asarray(x)
         shape = x.shape  # save the original shape
         x = x.view(-1, self._N)  # non-copy view
@@ -293,3 +292,230 @@ class SensitivityNDDiag:
 
         # restore the original shape but do not copy
         return J.view(shape+(self._P,))
+
+
+class SensitivityNDInterpDiag:
+    """Sensitivity interpolater for a N-D distribution w/ diagonal approximation.
+    """
+
+    def __init__(self, func, gridlines, params, eps):
+        self._density = func
+        self._gridlines = [torch.asarray(_) for _ in gridlines]
+        self._params = torch.asarray(params)
+        self._eps = torch.asarray(eps)
+
+        if self._eps.ndim == 0:
+            self._eps = self._eps.expand(self._params.shape)
+        elif self._eps.shape != self._params.shape:
+            raise ValueError("`eps` must be a scalar or array of `params`'s shape")
+
+        # derived attributes
+        self._P = len(params)  # number of parameters\
+        self._N = len(gridlines)  # number of spatial dimensions
+        self._two_eps = 2.0 * self._eps
+
+        # get all 1D conditional PDFs at all N-D vertices
+        self.pdfs = _misc.get_conditionals(self._density, self._gridlines, self._params)[0]
+
+        # get all 1D conditional CDFs at all N-D vertices under perturbed parameters
+        cdfs_p = []
+        cdfs_m = []
+        for j in range(self._P):
+            _pars = self._params.clone()
+            _pars[j] = _pars[j] + self._eps[j]
+            cdfs_p.append(_misc.get_conditionals(self._density, self._gridlines, _pars)[1])
+
+            _pars = self._params.clone()
+            _pars[j] = _pars[j] - self._eps[j]
+            cdfs_m.append(_misc.get_conditionals(self._density, self._gridlines, _pars)[1])
+
+        # empty container for d CDF_i / d param_j at all vertices
+        self.deltas = []
+
+        # loop over each 1D conditional direction
+        for i in range(self._N):
+            self.deltas.append([])
+            # loop over each parameter
+            for j in range(self._P):
+
+                # delta <- d CDF_i / d param_j at all vertices
+                self.deltas[i].append((cdfs_p[j][i]-cdfs_m[j][i])/self._two_eps[j])
+
+    def __call__(self, x):
+
+        x = torch.asarray(x)
+        shape = x.shape  # save the original shape
+        x = x.view(-1, self._N)  # non-copy view
+
+        J = torch.zeros(x.shape+(self._P,), dtype=x.dtype)
+
+        for i in range(self._N):
+            for j in range(self._P):
+                fx = _misc.interp_nd(x, self._gridlines, self.pdfs[i])
+                derv = _misc.interp_nd(x, self._gridlines, self.deltas[i][j])
+                J[:, i, j] = - derv / fx
+
+        # restore the original shape but do not copy
+        return J.view(shape+(self._P,))
+
+
+class SensitivityNDInterp:
+    """Sensitivity interpolater for a N-D distribution.
+    """
+
+    def __init__(self, func, gridlines, params, eps):
+        self._density = func
+        self._gridlines = [torch.asarray(_) for _ in gridlines]
+        self._params = torch.asarray(params)
+        self._eps = torch.asarray(eps)
+
+        if self._eps.ndim == 0:
+            self._eps = self._eps.expand(self._params.shape)
+        elif self._eps.shape != self._params.shape:
+            raise ValueError("`eps` must be a scalar or array of `params`'s shape")
+
+        # derived attributes
+        self._P = len(params)  # number of parameters\
+        self._N = len(gridlines)  # number of spatial dimensions
+        self._K = tuple(len(_) for _ in gridlines)  # number of vertices
+        self._two_eps = 2.0 * self._eps
+
+        # data for interpolations
+        self._J = self._construct_discrete_models()
+
+    def _construct_discrete_models(self):
+        """Construct values at vertices for later being used in interpolations.
+        """
+
+        # aliases for readability (should not do hard copying)
+        N = self._N
+        P = self._P
+        K = self._K
+        density = self._density
+        gridlines = self._gridlines
+        params = self._params
+
+        # get all 1D conditional PDFs at all N-D vertices
+        cdfs = _misc.get_conditionals(density, gridlines, params)[1]
+
+        # sanity check, can be removed later
+        for _ in cdfs:
+            assert _.shape == K
+
+        # get all 1D conditional CDFs at all N-D vertices under perturbed parameters
+        cdfs_p = []
+        cdfs_m = []
+        for j in range(self._P):
+            perturbed = params.clone()
+            perturbed[j] = perturbed[j] + self._eps[j]
+            cdfs_p.append(_misc.get_conditionals(density, gridlines, perturbed)[1])
+
+            # sanity check, can be removed later
+            for _ in cdfs_p[-1]:
+                print(_)
+                assert _.shape == K
+
+            perturbed = params.clone()
+            perturbed[j] = perturbed[j] - self._eps[j]
+            cdfs_m.append(_misc.get_conditionals(density, gridlines, perturbed)[1])
+
+            # sanity check, can be removed later
+            for _ in cdfs_m[-1]:
+                assert _.shape == K
+
+        # initialize arrays
+        H = torch.zeros(K + (N, N), dtype=cdfs[0].dtype)
+        G = torch.zeros(K + (N, P), dtype=cdfs[0].dtype)
+        J = torch.zeros(K + (N, P), dtype=cdfs[0].dtype)
+
+        # [preparing H]: loop over each spatial direction
+        for j in range(self._N):
+
+            # step sizes
+            h = self._gridlines[j][1:] - self._gridlines[j][:-1]
+
+            # vertices where central difference is applicable
+            k = tuple(slice(1, -1) if _ == j else slice(None) for _ in range(N))
+            kp = tuple(slice(2, None) if _ == j else slice(None) for _ in range(N))
+            km = tuple(slice(None, -2) if _ == j else slice(None) for _ in range(N))
+
+            # coefficients for central difference
+            div = h[1:] * h[:-1] * (h[1:] + h[:-1])
+            A = - h[1:]**2 / div  # for k-1-th terms
+            B = (h[1:] - h[:-1]) * (h[1:] + h[:-1]) / div  # for k-th terms
+            C = h[:-1]**2 / div  # for k+1-th terms
+
+            # loop over each 1D conditional direction and apply central difference
+            for i in range(self._N):
+                H[k+(i, j)] = A * cdfs[i][km] + B * cdfs[i][k] + C * cdfs[i][kp]
+
+            # vertices where forward difference is applicable
+            k = tuple(0 if _ == j else slice(None) for _ in range(N))
+            kp1 = tuple(1 if _ == j else slice(None) for _ in range(N))
+            kp2 = tuple(2 if _ == j else slice(None) for _ in range(N))
+
+            # coefficients for forward difference
+            div = h[0] * h[1] * (h[0] + h[1])
+            A = - h[1] * (2.0 * h[0] + h[1]) / div  # for k-th terms
+            B = (h[0] + h[1])**2 / div  # for k+1-th terms
+            C = - h[0]**2 / div  # for k+2-th terms
+
+            # loop over each 1D conditional direction and apply forward difference
+            for i in range(self._N):
+                H[k+(i, j)] = A * cdfs[i][k] + B * cdfs[i][kp1] + C * cdfs[i][kp2]
+
+            # vertices where backward difference is applicable
+            k = tuple(-1 if _ == j else slice(None) for _ in range(N))
+            km1 = tuple(-2 if _ == j else slice(None) for _ in range(N))
+            km2 = tuple(-3 if _ == j else slice(None) for _ in range(N))
+
+            # coefficients for backward difference
+            div = h[-1] * h[-2] * (h[-1] + h[-2])
+            A = h[-2] * (2.0 * h[-1] + h[-2]) / div  # for k-th terms
+            B = - (h[-1] + h[-2])**2 / div  # for k-1-th terms
+            C = h[-1]**2 / div  # for k-2-th terms
+
+            # loop over each 1D conditional direction and apply backward difference
+            for i in range(self._N):
+                H[k+(i, j)] = A * cdfs[i][k] + B * cdfs[i][km1] + C * cdfs[i][km2]
+
+        # [preparing G]: loop over each conditional
+        for i in range(N):
+            for j in range(P):  # loop over each parameter
+                G[..., i, j] = (cdfs_p[j][i] - cdfs_m[j][i]) / self._two_eps[j]
+
+        H = H.view(-1, N, N)
+        G = G.view(-1, N, P)
+        J = J.view(-1, N, P)
+
+        # solve the linear system one by one to avoid some singular sub-matrices
+        for ix in range(H.shape[0]):
+            try:
+                torch.linalg.solve(H[ix], G[ix], out=J[ix, :, :])
+            except torch._C._LinAlgError as err:  # pyright: ignore
+                # if the matrix is singular, set the gradients to zero
+                if "singular" in str(err):
+                    J[ix, :, :] = 0.0
+                else:
+                    raise
+
+        # apply the negative sign
+        J = torch.neg(J)
+
+        return J.view(K+(N, P))
+
+    def __call__(self, x):
+
+
+        x = torch.asarray(x)
+        shape = x.shape  # save the original shape
+        x = x.view(-1, self._N)  # non-copy view
+
+        Jx = torch.zeros(x.shape+(self._P,), dtype=x.dtype)
+
+        for i in range(self._N):
+            for j in range(self._P):
+                Jx[:, i, j] = _misc.interp_nd(x, self._gridlines, self._J[..., i, j])
+
+        # restore the original shape but do not copy
+        return Jx.view(shape+(self._P,))

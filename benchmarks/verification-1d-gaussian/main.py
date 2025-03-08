@@ -14,6 +14,8 @@ from cycler import cycler
 from distrosa.gradcalc import Sensitivity1D
 from distrosa.gradcalc import SensitivityND
 from distrosa.gradcalc import SensitivityNDDiag
+from distrosa.gradcalc import SensitivityNDInterp
+from distrosa.gradcalc import SensitivityNDInterpDiag
 
 
 pyplot.rcParams.update({
@@ -179,6 +181,8 @@ if __name__ == "__main__":
         "alg-2": "Subroutine 2",
         "alg-3": "Subroutine 3",
         "alg-4": "Subroutine 4",
+        "alg-6": "Subroutine 6",
+        "alg-7": "Subroutine 7",
     }
 
     # gradient calculator for each algorithm
@@ -186,6 +190,8 @@ if __name__ == "__main__":
         "alg-2": Sensitivity1D,
         "alg-3": SensitivityND,
         "alg-4": SensitivityNDDiag,
+        "alg-6": SensitivityNDInterp,
+        "alg-7": SensitivityNDInterpDiag,
     }
 
     # visualize the sensitivities from all algorithms
