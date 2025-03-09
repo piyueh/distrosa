@@ -49,17 +49,8 @@ def pdf(x, params):
     """Probability density function for 1D Gaussian distribution.
     """
     mu, sigma = params
-    coeff_1 = - 2.0 * sigma * sigma
-    coeff_2 = sigma * torch.sqrt(torch.asarray(2.0*math.pi))
-    return torch.exp((x-mu)**2/coeff_1) / coeff_2
-
-
-def cdf(x, params):
-    """Cumulative distribution function for 1D Gaussian distribution.
-    """
-    mu, sigma = params
-    coeff = torch.sqrt(torch.asarray(2.0)) * sigma
-    return (1.0 + torch.special.erf((x-mu)/coeff)) / 2.0
+    dist = torch.distributions.Normal(mu, sigma)
+    return torch.exp(dist.log_prob(x))
 
 
 def sensitivity_demo(nv, xmin, xmax, params, eps, calculators, labels, figdir):

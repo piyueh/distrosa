@@ -69,8 +69,9 @@ def get_conditionals(func, verts, params):
       which are inferred from `verts[i]` for i=1,2,...,N.
     """
 
-    verts = [torch.asarray(v) for v in verts]  # convert to PyTorch tensors
-    params = torch.asarray(params)  # convert to PyTorch tensor
+    # extract info (so params must be a torch.Tensor)
+    ftype = params.dtype
+    device = params.device
     N = len(verts)  # number of dimensions
     K = [len(v) for v in verts]  # number of vertices in each dimension
 
@@ -107,7 +108,7 @@ def get_conditionals(func, verts, params):
         normloc[i] = slice(-1, None)
         normloc = tuple(normloc)
 
-        tmp = torch.zeros(K, dtype=params.dtype, device=params.device)
+        tmp = torch.zeros(K, dtype=ftype, device=device)
         tmp[high] = (eta[low] + eta[high]) * (vi[1:] - vi[:-1])[bcast] / 2.0
         tmp = torch.cumsum(tmp, i)
 
@@ -159,17 +160,61 @@ def interp_1d(x, verts, values):
     return interp
 
 
+def multi_interp_1d(x, verts, values):
+    """Multiple piecewise linear interpolation happening at the same time.
+
+    Regardless the shape/dim of `x`, it is treated like a sequence of 1D coordinates
+    in different shape. So `x` can have an arbitrary shape, but the dimension of `verts`
+    and `values` must be as follows:
+        * verts.ndim == 1
+        * values.ndim = x.ndim + 1
+        * values.shape == x.shape + verts.shape
+    """
+
+    assert verts.ndim == 1
+    assert values.ndim == x.ndim + 1
+    assert values.shape == x.shape + verts.shape
+
+    # easier to work with flattened arrays
+    xshape = x.shape
+    x = x.view(-1)  # shape (x.numel(),)
+    values = values.view(-1, len(verts))  # shape (x.numel(), len(verts))
+    ix = torch.arange(x.numel())  # shape (x.numel(),)
+
+    # idx.shape: (x.numel(),)
+    idx = torch.searchsorted(verts, x, side="right")
+    idx = torch.clamp(idx, 1, len(verts)-1)
+
+    # dx.shape: (x.numel(),)
+    dx = verts[idx] - verts[idx-1]
+
+    # ds.shape: (x.numel(),)
+    ds = x - verts[idx-1]
+
+    # dval.shape: (x.numel(),)
+    low = values[(ix, idx.view(-1)-1)]
+    dval = values[(ix, idx)] -  low
+
+    # interpolate; shape: (x.numel(),)
+    interp = low + dval * ds / dx
+
+    # reshape without copying; shape original x.shape
+    return interp.view(xshape)
+
+
 def interp_nd(x, verts, values):
     """Piecewise linear interpolation to multiple points in N-D space.
     """
 
-    # aliases
+    # extract info (so values must be a torch.Tensor)
+    ftype = values.dtype
+    device = values.device
     N = len(verts)  # number of dimensions
     K = [len(v) for v in verts]  # number of vertices in each dimension
-    coeff = torch.asarray(2**N, dtype=values.dtype, device=values.device)
+    coeff = torch.asarray(2**N, dtype=ftype, device=device)
 
-    # make it a torch tensor of shape (..., N)
-    x = torch.asarray(x)
+    # make it a torch tensor of shape (..., N) in case this is a scalar
+    x = torch.asarray(x, dtype=ftype, device=device)
 
     if N == 1 and x.shape[-1] != 1:  # only automatically cast the shape for 1D
         x = x.unsqueeze(-1)
@@ -177,10 +222,10 @@ def interp_nd(x, verts, values):
     assert x.shape[-1] == N  # other dimension is users' responsibility to ensure this
 
     # hypercube indices (note the N is the leading dimension for convenience later)
-    ids = torch.zeros((N,)+x.shape[:-1], dtype=torch.int64, device=values.device)
+    ids = torch.zeros((N,)+x.shape[:-1], dtype=torch.int64, device=device)
 
     # local coordinates (in [-1, 1]^N) for points in their hypercubes
-    local = torch.zeros(x.shape[:-1]+(N,), dtype=x.dtype, device=values.device)
+    local = torch.zeros(x.shape[:-1]+(N,), dtype=ftype, device=device)
 
     for i in range(N):
         # aliases for readability
@@ -199,7 +244,7 @@ def interp_nd(x, verts, values):
     for key in itertools.product([0, 1], repeat=N):
 
         # node corresponds to this shape function for all points in x
-        node = torch.asarray(key, dtype=torch.int64, device=values.device)
+        node = torch.asarray(key, dtype=torch.int64, device=device)
         node = ids + node.view((N,)+tuple(1 for _ in range(x.ndim-1)))
 
         # shape function's values at all points in x
