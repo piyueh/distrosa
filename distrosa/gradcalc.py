@@ -174,6 +174,8 @@ class SensitivityND:
         -----
         * To keep the code simple, we do not check whether the last dimension of `x`
           is N or not.
+        * To avoid OOM, we split `x` to smaller chuncks according to the size of
+          background grid.
         """
 
         # in case x is a scalar or a built-in list
@@ -184,6 +186,40 @@ class SensitivityND:
             x = x.view(x.shape+(1,))  # non-copy view
         else:
             assert x.shape[-1] == self._N
+
+        nelms_per_1g = 134217728  # number of doubles per 1 GB
+        bsize = nelms_per_1g // max(self._K) // self._N
+
+        if x.numel() // self._N > bsize:
+            J = []
+            _x = x.view(-1, self._N)
+            for i in range(0, _x.shape[0], bsize):
+                J.append(self._backend(_x[i:i+bsize]))
+            J = torch.cat(J, dim=0).view(x.shape[:-1]+(self._N, self._P))
+        else:
+            J = self._backend(x)
+
+        return J
+
+    def _backend(self, x):
+        """Calculate the gradient at space points.
+
+        Arguments
+        ---------
+        x : N-D array
+            Space points where the gradient is calculated. The last dimension of `x`
+            must be N, which is the number of spatial dimensions.
+
+        Returns
+        -------
+        g : N-D array of shape x.shape + (P,)
+            Gradient values at space points.
+
+        Notes
+        -----
+        * To keep the code simple, we do not check whether the last dimension of `x`
+          is N or not.
+        """
 
         # aliases for readability
         N = self._N
@@ -334,6 +370,8 @@ class SensitivityNDDiag:
         -----
         * To keep the code simple, we do not check whether the last dimension of `x`
           is N or not.
+        * To avoid OOM, we split `x` to smaller chuncks according to the size of
+          background grid.
         """
 
         # in case x is a scalar or a built-in list
@@ -345,6 +383,40 @@ class SensitivityNDDiag:
         else:
             assert x.shape[-1] == self._N
 
+        nelms_per_1g = 134217728  # number of doubles per 1 GB
+        bsize = nelms_per_1g // max(self._K) // self._N
+
+        if x.numel() // self._N > bsize:
+            J = []
+            _x = x.view(-1, self._N)
+            for i in range(0, _x.shape[0], bsize):
+                J.append(self._backend(_x[i:i+bsize]))
+            J = torch.cat(J, dim=0).view(x.shape[:-1]+(self._N, self._P))
+        else:
+            J = self._backend(x)
+
+        return J
+
+    def _backend(self, x):
+        """Calculate the gradient at space points.
+
+        Arguments
+        ---------
+        x : N-D array
+            Space points where the gradient is calculated. The last dimension of `x`
+            must be N, which is the number of spatial dimensions.
+
+        Returns
+        -------
+        g : N-D array of shape x.shape + (P,)
+            Gradient values at space points.
+
+        Notes
+        -----
+        * To keep the code simple, we do not check whether the last dimension of `x`
+          is N or not.
+        """
+
         # aliases for readability
         N = self._N
         P = self._P
@@ -353,7 +425,7 @@ class SensitivityNDDiag:
         xshape = x.shape[:-1]  # the number/shape of the points
 
         # empty containers
-        J = torch.zeros(xshape+(N, P), dtype=x.dtype)
+        J = torch.zeros(xshape+(N, P), dtype=self._ftype, device=self._device)
 
         # construct \partial F_i / \partial param_j
         for i in range(N):
@@ -411,6 +483,7 @@ class SensitivityNDDiag:
 
             # calculate normalized PDF at x directly (rather than interpolation)
             _pdf = self._density(x, self._params).view(xshape)  # shape (Nx,)
+            _pdf = _pdf / norm
 
             # scale J[..., i, :] by -1 / f(x)
             J[..., i, :] = - J[..., i, :] / _pdf.view(xshape+(1,))
@@ -632,20 +705,9 @@ class SensitivityNDInterp:
             for j in range(P):  # loop over each parameter
                 G[..., i, j] = (cdfs_p[j][i] - cdfs_m[j][i]) / self._two_eps[j]
 
-        H = H.view(-1, N, N)
-        G = G.view(-1, N, P)
-        J = J.view(-1, N, P)
-
-        # solve the linear system one by one to avoid some singular sub-matrices
-        for ix in range(H.shape[0]):
-            try:
-                torch.linalg.solve(H[ix], G[ix], out=J[ix, :, :])
-            except torch._C._LinAlgError as err:  # pyright: ignore
-                # if the matrix is singular, set the gradients to zero
-                if "singular" in str(err):
-                    J[ix, :, :] = 0.0
-                else:
-                    raise
+        # solve the linear systems (avoid singular matrices)
+        valid = torch.linalg.matrix_rank(H) >= N
+        J[valid, :, :] = torch.linalg.solve(H[valid], G[valid])
 
         # apply the negative sign
         J = torch.neg(J)

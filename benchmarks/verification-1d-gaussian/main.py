@@ -26,9 +26,14 @@ pyplot.rcParams.update({
     "ytick.labelsize": "small",
     "legend.fontsize": "small",
     "legend.title_fontsize": "small",
-    "figure.dpi": 192,
+    "figure.dpi": 768,
     "figure.titlesize": "medium",
+    "figure.constrained_layout.use": True,
     "lines.linewidth": 2.0,
+    "image.cmap": "turbo",
+    "savefig.dpi": 768,
+    "savefig.format": "png",
+    "savefig.bbox": "tight"
 })
 
 # line styles
@@ -73,25 +78,27 @@ def sensitivity_demo(nv, xmin, xmax, params, eps, calculators, labels, figdir):
 
     # plot \partial x / \partial \mu
     lscycler = itertools.cycle(linestyles)
-    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
+    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
     ax.plot(v, theo[..., 0], label="Analytical", lw=2, color="k")
     for key, out in outs.items():
         ax.plot(v, out[..., 0], label=labels[key], alpha=0.85, ls=next(lscycler))
     ax.legend(loc=0)
     ax.set_xlabel(r"$x$")
     ax.set_ylabel(r"$\partial x \slash \partial \mu$")
-    fig.savefig(figdir.joinpath("sensitivity_mu.pdf"), dpi=192, bbox_inches="tight")
+    fig.savefig(figdir.joinpath("sensitivity_mu"))
+    pyplot.close(fig)
 
     # plot \partial x / \partial \sigma
     lscycler = itertools.cycle(linestyles)
-    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
+    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
     ax.plot(v, theo[..., 1], label="Analytical", lw=2, color="k")
     for key, out in outs.items():
         ax.plot(v, out[..., 1], label=labels[key], alpha=0.85, ls=next(lscycler))
     ax.legend(loc=0)
     ax.set_xlabel(r"$x$")
     ax.set_ylabel(r"$\partial x \slash \partial \sigma$")
-    fig.savefig(figdir.joinpath("sensitivity_sigma.pdf"), dpi=192, bbox_inches="tight")
+    fig.savefig(figdir.joinpath("sensitivity_sigma"))
+    pyplot.close(fig)
 
 
 def error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir):
@@ -127,28 +134,85 @@ def error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir):
             errs_1.setdefault(key, []).append(scipy.integrate.romb(err[:, 1]*w, dx))
 
     lscycler = itertools.cycle(linestyles)
-    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
+    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
     for key, err in errs_0.items():
         ax.plot(nvs, err, label=labels[key], ls=next(lscycler))
+
     ax.grid(True, which="both", zorder=-1, lw=0.5)
-    ax.legend(loc=0)
     ax.set_xscale("log")
-    ax.set_xlabel(r"Number of Vertices")
+    ax.set_xlabel(r"$N$")
     ax.set_yscale("log")
     ax.set_ylabel(r"$L_1$ Error of $\partial x \slash \partial \mu$")
-    fig.savefig(figdir.joinpath("error_mu.pdf"), dpi=192, bbox_inches="tight")
+
+    # plot 1st order reference
+    ox1, oy1 = ax.transAxes.transform((0.1, 1.05))  # axes to display coordinates
+    ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display to data coordinates
+    ox2, oy2 = ax.transAxes.transform((0.5, 1.05))  # axes to display coordinates
+    ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display to data coordinates
+    oy2 = ox1 * oy1 / ox2
+    ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+    ax.text(
+        ox2*10**0.1, oy2, r"$\mathcal{O}(N^{-1})$", fontsize="x-small", ha="left",
+        va="bottom", bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+    )
+
+    # plot 2nd order reference
+    ox1, oy1 = ax.transAxes.transform((0.1, 0.75))  # axes to display coordinates
+    ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display to data coordinates
+    ox2, oy2 = ax.transAxes.transform((0.5, 0.75))  # axes to display coordinates
+    ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display to data coordinates
+    oy2 = (ox1 / ox2)**2 * oy1
+    ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+    ax.text(
+        ox1*3.16, oy1*(oy2/oy1)**0.5, r"$\mathcal{O}(N^{-2})$", fontsize="x-small",
+        ha="right", va="top",
+        bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+    )
+
+    ax.legend(loc="upper right", bbox_to_anchor=(0.999, 0.43))
+
+    fig.savefig(figdir.joinpath("error_mu"))
+    pyplot.close(fig)
 
     lscycler = itertools.cycle(linestyles)
-    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5), layout="constrained")
+    fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
     for key, err in errs_1.items():
         ax.plot(nvs, err, label=labels[key], ls=next(lscycler))
+
     ax.grid(True, which="both", zorder=-1, lw=0.5)
-    ax.legend(loc=0)
     ax.set_xscale("log")
-    ax.set_xlabel(r"Number of Vertices")
+    ax.set_xlabel(r"$N$")
     ax.set_yscale("log")
     ax.set_ylabel(r"$L_1$ Error of $\partial x \slash \partial \sigma$")
-    fig.savefig(figdir.joinpath("error_sigma.pdf"), dpi=192, bbox_inches="tight")
+
+    # plot 1st order reference
+    ox1, oy1 = ax.transAxes.transform((0.1, 1.05))  # axes to display coordinates
+    ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display to data coordinates
+    ox2, oy2 = ax.transAxes.transform((0.5, 1.05))  # axes to display coordinates
+    ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display to data coordinates
+    oy2 = ox1 * oy1 / ox2
+    ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+    ax.text(
+        ox2, oy2*10**0.3, r"$\mathcal{O}(N^{-1})$", fontsize="x-small", ha="left",
+        va="bottom", bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+    )
+
+    # plot 2nd order reference
+    ox1, oy1 = ax.transAxes.transform((0.1, 0.75))  # axes to display coordinates
+    ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display to data coordinates
+    ox2, oy2 = ax.transAxes.transform((0.5, 0.75))  # axes to display coordinates
+    ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display to data coordinates
+    oy2 = (ox1 / ox2)**2 * oy1
+    ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+    ax.text(
+        ox1*3.16, oy1*(oy2/oy1)**0.5, r"$\mathcal{O}(N^{-2})$", fontsize="x-small",
+        ha="right", va="top",
+        bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+    )
+
+    ax.legend(loc="upper right", bbox_to_anchor=(0.999, 0.67))
+
+    fig.savefig(figdir.joinpath("error_sigma"))
 
 
 if __name__ == "__main__":
@@ -191,4 +255,3 @@ if __name__ == "__main__":
     # different background resolutions
     nvs = numpy.power(2, numpy.arange(5, 14))
     error_estimation(nvs, xmin, xmax, params, eps, calculators, labels, figdir)
-    pyplot.show()
