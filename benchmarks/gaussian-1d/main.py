@@ -230,6 +230,7 @@ def plot_errors(x, ans, pdfvals, computed, figdir):
         fig.savefig(figdir.joinpath(f"error_{names[i]}"))
         pyplot.close(fig)
 
+
 if __name__ == "__main__":
     import pathlib
 

@@ -3,12 +3,12 @@
 
 """N-D sensitivity calculator via interpolation and the diagonal approximation.
 """
+import sys
 from typing import Callable
 from typing import Sequence
 from numpy.typing import NDArray
 from numpy.typing import DTypeLike
 from numpy.typing import ArrayLike
-from . import _np
 from ._misc import getconditionals as _getconditionals
 from ._misc import interpnd as _interpnd
 
@@ -25,7 +25,8 @@ class SensitivityNDDiagInterp:
 
     gridlines : Sequence[NDArray]
         Vertices along the gridline in each spatial dimension. `len(gridlines)` must
-        be the dimensionality.
+        be the dimensionality. We use `gridlines[0]` to determine if the backend is
+        cupy or numpy. So it must be a numpy/cupy array.
 
     eps : float | NDArray
         Finite difference step size(s) for paramerters.
@@ -46,17 +47,20 @@ class SensitivityNDDiagInterp:
         gridlines: Sequence[NDArray],
         eps: float | NDArray,
     ):
+
+        self._np = sys.modules[gridlines[0].__class__.__module__]
+
         self._density = func
 
         # dealting w/ the gridlines and vertices
-        self._gridlines: Sequence[NDArray] = [_np.array(_) for _ in gridlines]
+        self._gridlines: Sequence[NDArray] = [self._np.array(_) for _ in gridlines]
         self._ftype: DTypeLike = self._gridlines[0].dtype
         self._N: int = len(self._gridlines)  # num. of spatial dimensions
         self._K: tuple[int, ...] = tuple(len(_) for _ in gridlines)  # num. of vertices
         self._dx: Sequence[NDArray] = [_[1:] - _[:-1] for _ in self._gridlines]
 
         # dealing w/ the finite difference step size
-        self._eps = _np.array(eps, dtype=self._ftype)
+        self._eps = self._np.array(eps, dtype=self._ftype)
 
         # data for interpolations
         self._deltas: None | Sequence[Sequence[NDArray]] = None  # (d CDF_i / d param_j)
@@ -70,6 +74,8 @@ class SensitivityNDDiagInterp:
 
         `self._pdfs` and `self._deltas` are constructed and updated here.
         """
+
+        _np = self._np
 
         # in case this is a list; it's a no-op if already a ndarray w/ correct dtype
         params = _np.asarray(params, dtype=self._ftype)
@@ -145,6 +151,8 @@ class SensitivityNDDiagInterp:
         * Parameters can still be anything that implements the array interface.
         """
 
+        _np = self._np
+
         # check if self._delta needs to be reconstructed
         if self.needupdate(params):
             self._construct(params)
@@ -178,6 +186,8 @@ class SensitivityNDDiagInterp:
         bool
             Whether the internal data needs to be updated.
         """
+
+        _np = self._np
 
         if self._deltas is None:
             return True

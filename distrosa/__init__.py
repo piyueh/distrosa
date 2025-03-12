@@ -7,13 +7,6 @@
 
 """DistroSA: a Python package for distributional sensitivity analysis.
 """
-try:
-    import cupy as _np
-    device = "cuda"
-except ImportError:
-    import numpy as _np
-    device = "cpu"
-
 from ._sensitivity_1d import Sensitivity1D
 from ._sensitivity_nd import SensitivityND
 from ._sensitivity_nd_diag import SensitivityNDDiag

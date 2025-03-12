@@ -3,12 +3,12 @@
 
 """Implementations of a calculator for N-D sensitivity using the diagonal approximation.
 """
+import sys
 from typing import Callable
 from typing import Sequence
 from numpy.typing import NDArray
 from numpy.typing import DTypeLike
 from numpy.typing import ArrayLike
-from . import _np
 from ._misc import minterp as _minterp
 from ._misc import getcdf as _getcdf
 
@@ -25,7 +25,8 @@ class SensitivityNDDiag:
 
     gridlines : Sequence[NDArray]
         Vertices along the gridline in each spatial dimension. `len(gridlines)` must
-        be the dimensionality.
+        be the dimensionality. We use `gridlines[0]` to determine if the backend is
+        cupy or numpy. So it must be a numpy/cupy array.
 
     eps : float | NDArray
         Finite difference step size(s) for paramerters.
@@ -47,17 +48,19 @@ class SensitivityNDDiag:
         eps: float | NDArray,
     ):
 
+        self._np = sys.modules[gridlines[0].__class__.__module__]
+
         self._density = func
 
         # dealting w/ the gridlines and vertices
-        self._gridlines: Sequence[NDArray] = [_np.array(_) for _ in gridlines]
+        self._gridlines: Sequence[NDArray] = [self._np.array(_) for _ in gridlines]
         self._ftype: DTypeLike = self._gridlines[0].dtype
         self._N: int = len(self._gridlines)  # num. of spatial dimensions
         self._K: tuple[int, ...] = tuple(len(_) for _ in gridlines)  # num. of vertices
         self._dx: Sequence[NDArray] = [_[1:] - _[:-1] for _ in self._gridlines]
 
         # dealing w/ the finite difference step size
-        self._eps = _np.array(eps, dtype=self._ftype)
+        self._eps = self._np.array(eps, dtype=self._ftype)
 
     def __call__(self, x: NDArray, params: NDArray) -> NDArray:
         """Calculate the gradient at space points.
@@ -85,6 +88,8 @@ class SensitivityNDDiag:
         * Parameters can still be anything that implements the array interface.
         """
 
+        _np = self._np
+
         # make sure we're always using shape (..., N) even if N = 1
         if self._N == 1 and x.shape[-1] != 1:
             x = x.reshape(x.shape+(1,))  # non-copy view
@@ -107,6 +112,8 @@ class SensitivityNDDiag:
     def _backend(self, x: NDArray, params: NDArray) -> NDArray:
         """Calculate the gradient at space points.
         """
+
+        _np = self._np
 
         # in case this is a list; it's a no-op if already a ndarray w/ correct dtype
         params = _np.asarray(params, dtype=self._ftype)

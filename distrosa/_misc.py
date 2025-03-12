@@ -5,11 +5,11 @@
 
 This module is supposed to be used internally.
 """
+import sys
 import itertools
 from typing import Callable
 from typing import Sequence
 from numpy.typing import NDArray
-from . import _np
 
 
 def getconditionals(
@@ -51,6 +51,7 @@ def getconditionals(
     """
 
     # extract info (so params must already be a NDArray)
+    _np = sys.modules[params.__class__.__module__]
     ftype = params.dtype
     device = params.device
     N = len(verts)  # number of dimensions
@@ -110,6 +111,7 @@ def interpnd(x, verts, values):
     """
 
     # extract info (so values must be a _np.ndarray)
+    _np = sys.modules[values.__class__.__module__]
     ftype = values.dtype
     N = len(verts)  # number of dimensions
     K = [len(v) for v in verts]  # number of vertices in each dimension
@@ -169,6 +171,9 @@ def getcdf(
     Mostly for internal use.
     """
 
+    # determine if it's numpy or cupy using params
+    _np = sys.modules[params.__class__.__module__]
+
     vals = density(x, params).reshape(x.shape[:-1])  # some 1D PDF return shape (Nx, 1)
     _np.add(vals[..., 1:], vals[..., :-1], out=vals[..., 1:])
     _np.multiply(vals[..., 1:], h, out=vals[..., 1:])
@@ -193,6 +198,9 @@ def minterp(x: NDArray, verts: NDArray, h: NDArray, values: NDArray):
 
     This ie memory inefficient!!
     """
+
+    # determine if it's numpy or cupy using verts
+    _np = sys.modules[verts.__class__.__module__]
 
     assert verts.ndim == 1
     assert values.ndim == x.ndim + 1

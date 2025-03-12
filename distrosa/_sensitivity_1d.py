@@ -3,11 +3,11 @@
 
 """Implementation of the 1D sensitivity analysis.
 """
+import sys
 from typing import Callable
 from numpy.typing import NDArray
 from numpy.typing import DTypeLike
 from numpy.typing import ArrayLike
-from . import _np
 
 
 class Sensitivity1D:
@@ -21,6 +21,8 @@ class Sensitivity1D:
 
     gridline : NDArray
         Vertices along a 1D gridline. Must be a 1D array in ascending order.
+        We use `gridline` to determine if the backend is cupy or numpy. So `gridline`
+        must be a numpy/cupy array.
 
     eps : float | NDArray
         Finite difference step size(s). If a scalar, it is used for all parameters.
@@ -39,16 +41,18 @@ class Sensitivity1D:
         eps: float | NDArray
     ):
 
+        self._np = sys.modules[gridline.__class__.__module__]
+
         self._density = func
 
         # dealting w/ the gridlines and vertices
-        self._gridline: NDArray = _np.array(gridline)
+        self._gridline: NDArray = self._np.array(gridline)
         self._ftype: DTypeLike = self._gridline.dtype
         self._N: int = 1  # this class is for 1D distribution only
         self._dx: NDArray = self._gridline[1:] - self._gridline[:-1]
 
         # dealing w/ the finite difference step size
-        self._eps: NDArray = _np.array(eps, dtype=self._ftype)
+        self._eps: NDArray = self._np.array(eps, dtype=self._ftype)
 
     def __call__(self, x: NDArray, params: NDArray) -> NDArray:
         """Calculate the gradient at space points.
@@ -73,6 +77,8 @@ class Sensitivity1D:
         * The inputs accept anything that implements the array interface, but the output
           is always a numpy/cupy ndarray.
         """
+
+        _np = self._np
 
         # in case this is a scalar; it's a no-op if already a ndarray w/ correct dtype
         x = _np.asarray(x, dtype=self._ftype)
@@ -120,9 +126,12 @@ class Sensitivity1D:
         # stack the results and return
         return gj
 
-    def _cdf(self, params: NDArray) -> tuple[_np.ndarray, _np.ndarray]:
+    def _cdf(self, params: NDArray) -> tuple[NDArray, NDArray]:
         """Get 1D CDF numerically.
         """
+
+        _np = self._np
+
         # unnormalized PDF values at vertices
         pdfs = self._density(self._gridline, params)
 
