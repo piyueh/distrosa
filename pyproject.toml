@@ -20,14 +20,15 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
-dynamic = ["dependencies", "version"]
-requires-python = ">=3.10"
+dynamic = ["version",]
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.1",]
 
 [project.urls]
-homepage = "https://gitlab.com/ahmedattia/distributional_sensitivity_analysis"
+homepage = "https://gitlab.com/ahmedattia/distrosa"
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[project.optional-dependencies]
+cupy = ["cupy-cuda12x~=13.4",]
 
 [tool.setuptools.packages]
 find = {}
