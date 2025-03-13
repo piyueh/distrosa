@@ -168,7 +168,7 @@ class SensitivityNDDiagInterp:
             for j in range(len(params)):
                 fx = _interpnd(x, self._gridlines, self._pdfs[i])
                 derv = _interpnd(x, self._gridlines, self._deltas[i][j])
-                J[:, i, j] = - derv / fx
+                J[..., i, j] = - derv / fx
 
         # 1D is special... we don't want the shape to be (Nx, 1, P)
         return J.reshape(*x.shape[:-1], -1,) if self._N == 1 else J

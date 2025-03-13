@@ -183,7 +183,7 @@ class SensitivityNDInterp:
 
         for i in range(self._N):
             for j in range(len(params)):
-                Jx[:, i, j] = _interpnd(x, self._gridlines, self._J[..., i, j])
+                Jx[..., i, j] = _interpnd(x, self._gridlines, self._J[..., i, j])
 
         # 1D is special... we don't want the shape to be (Nx, 1, P)
         return Jx.reshape(*x.shape[:-1], -1,) if self._N == 1 else Jx
