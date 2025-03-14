@@ -180,7 +180,7 @@ def getcdf(
     _np.divide(vals[..., 1:], 2.0, out=vals[..., 1:])
     vals[..., 0] = 0.0
     _np.cumsum(vals, -1, out=vals)
-    norm = vals[..., -1]
+    norm = vals[..., -1].copy()
     _np.divide(vals, norm.reshape(vals.shape[:-1]+(1,)), out=vals)
 
     return vals, norm
