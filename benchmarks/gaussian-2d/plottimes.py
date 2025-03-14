@@ -50,7 +50,6 @@ def plot_costs(nvs, data, figdir):
     pyplot.close(fig)
 
 
-
 if __name__ == "__main__":
     import pathlib
 

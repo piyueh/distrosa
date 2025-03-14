@@ -29,6 +29,9 @@ pnames = ["mu_1", "mu_2", "sigma_1", "sigma_2", "rho"]
 def plot_convergences(nvs, convs, figdir):
     """Plot the error convergence.
     """
+    keys = sorted(convs.keys(), key=lambda x: int(x[-1]))
+    convs = {k: convs[k] for k in keys}
+
 
     for ij in itertools.product(range(2), range(5)):
 

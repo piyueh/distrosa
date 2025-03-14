@@ -21,7 +21,7 @@ pyplot.rcParams.update({
     "figure.dpi": 768,
     "figure.titlesize": "medium",
     "figure.constrained_layout.use": True,
-    "lines.linewidth": 2.0,
+    "lines.linewidth": 1.5,
     "image.cmap": "turbo",
     "savefig.dpi": 768,
     "savefig.format": "png",
@@ -42,11 +42,11 @@ algcls = {
 
 # mapping between algorithm keys and names in plots
 alglbls = {
-    "alg-2": "Subroutine 2",
-    "alg-3": "Subroutine 3",
-    "alg-4": "Subroutine 4",
-    "alg-6": "Subroutine 6",
-    "alg-7": "Subroutine 7",
+    "alg-2": "1D Alg",
+    "alg-3": "Full Inv",
+    "alg-4": "Diag Approx",
+    "alg-6": "Interp Full",
+    "alg-7": "Interp Diag",
 }
 
 
