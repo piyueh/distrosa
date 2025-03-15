@@ -7,8 +7,8 @@
 
 """DistroSA: a Python package for distributional sensitivity analysis.
 """
-from ._sensitivity_1d import Sensitivity1D
-from ._sensitivity_nd import SensitivityND
-from ._sensitivity_nd_diag import SensitivityNDDiag
-from ._sensitivity_nd_interp import SensitivityNDInterp
-from ._sensitivity_nd_diag_interp import SensitivityNDDiagInterp
+from .graders.sensitivity_1d import Sensitivity1D
+from .graders.sensitivity_nd import SensitivityND
+from .graders.sensitivity_nd_diag import SensitivityNDDiag
+from .graders.sensitivity_nd_interp import SensitivityNDInterp
+from .graders.sensitivity_nd_diag_interp import SensitivityNDDiagInterp
