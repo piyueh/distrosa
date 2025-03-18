@@ -5,6 +5,7 @@
 """
 import itertools
 import numpy
+import torch
 import matplotlib.pyplot as pyplot
 
 
@@ -99,20 +100,16 @@ if __name__ == "__main__":
     pyplot.style.use(figdir.parent.joinpath("plot.mplstyle"))
 
     print("loading fullmtx results")
-
-    with numpy.load(figdir.joinpath("fullmtx.meta.npz")) as dset:
-        nvs = dset["nvs"]
-
-    with numpy.load(figdir.joinpath("fullmtx.convs.npz")) as dset:
-        convs = dict(dset)
+    dset = torch.load(figdir.joinpath("fullmtx.dat"))
+    nvs = dset["nvs"]
+    convs = {alg: torch.stack(val).numpy() for alg, val in dset["convs"].items()}
+    del dset
 
     print("loading diagapprox results")
-
-    with numpy.load(figdir.joinpath("diagapprox.meta.npz")) as dset:
-        nvs = dset["nvs"]
-
-    with numpy.load(figdir.joinpath("diagapprox.convs.npz")) as dset:
-        convs.update(dict(dset))
+    dset = torch.load(figdir.joinpath("diagapprox.dat"))
+    nvs = dset["nvs"]
+    convs.update({alg: torch.stack(val).numpy() for alg, val in dset["convs"].items()})
+    del dset
 
     print("plotting error convergences")
     plot_convergences(nvs, convs, figdir)

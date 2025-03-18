@@ -64,7 +64,7 @@ class SensitivityND(SensitivityBase):
         # easier to process in this arrangement
         _x = x.view(-1, self.ndim)
 
-        if x.shape[0] > bsize:
+        if _x.shape[0] > bsize:
             J = []
             for i in range(0, _x.shape[0], bsize):
                 J.append(self._backend(_x[i:i+bsize], params))

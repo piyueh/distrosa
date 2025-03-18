@@ -109,5 +109,5 @@ if __name__ == "__main__":
     # save to a file
     torch.save({
         "x": x, "ans": ans, "pdfvals": pdfvals, "computed": computed, "nvs": nvs,
-        "algs": algs, "params": params, "bounds": bounds, "eps": eps,
+        "algs": algs, "params": params.cpu(), "bounds": bounds.cpu(), "eps": eps,
     }, figdir.joinpath("results.dat"))

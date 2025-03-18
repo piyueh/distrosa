@@ -44,6 +44,19 @@ scalar loss with respect to the parameters of the distribution, then it will be 
 Currently, only `Sensitivity1D`, `SensitivityND`, and `SensitivityDDDiag` works with
 `torch.jit.script`.
 
+### Peak Memory Consumption
+
+In order to exploit the performance benefits of array/tensor operations, many
+intermediate huge tensors are created during the calculations. This can lead to high peak
+memory consumption, causing out-of-memory (OOM) errors.
+This happends especially when using `SensitivityND` and `SensitivityNDDiag`.
+We have some batching mechanism in place to reduce the peak memory consumption, which
+hard-codes some intermediate tensors to have only 1GB memory consumptions.
+However, depending on how users implement other things, OOM may still happen.
+Though this can be improved by further refactorizing the code, we don't currently have
+a plan to do so because `SensitivityND` and `SensitivityNDDiag` are rarely used in real
+applications.
+
 ## Installation:
 
 ### Create virual environment (Only Once)

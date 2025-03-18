@@ -5,6 +5,7 @@
 """
 import itertools
 import numpy
+import torch
 import matplotlib.pyplot as pyplot
 import matplotlib.colors as mcolors
 import matplotlib.cm as mcm
@@ -73,23 +74,19 @@ if __name__ == "__main__":
     pyplot.style.use(figdir.parent.joinpath("plot.mplstyle"))
 
     print("loading fullmtx results")
-
-    with numpy.load(figdir.joinpath("fullmtx.meta.npz")) as dset:
-        x = dset["x"]
-
-    with numpy.load(figdir.joinpath("fullmtx.errs.npz")) as dset:
-        errs = dict(dset)
+    dset = torch.load(figdir.joinpath("fullmtx.dat"))
+    x = dset["x"].numpy()
+    errs = {alg: torch.stack(val).numpy() for alg, val in dset["errs"].items()}
+    del dset
 
     print("plotting fullmtx errors")
     plot_errors(x, errs, figdir)
 
-    print("loading fullmtx results")
-
-    with numpy.load(figdir.joinpath("diagapprox.meta.npz")) as dset:
-        x = dset["x"]
-
-    with numpy.load(figdir.joinpath("diagapprox.errs.npz")) as dset:
-        errs = dict(dset)
+    print("loading diagapprox results")
+    dset = torch.load(figdir.joinpath("diagapprox.dat"))
+    x = dset["x"].numpy()
+    errs = {alg: torch.stack(val).numpy() for alg, val in dset["errs"].items()}
+    del dset
 
     print("plotting diagapprox errors")
     plot_errors(x, errs, figdir)

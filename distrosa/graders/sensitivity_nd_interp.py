@@ -79,14 +79,14 @@ class SensitivityNDInterp(SensitivityBase):
         )[1]  # only needs normalized conditional CDFs
 
         # [preparing H]
-        for j in range(ndim):  # loop over each spatial direction
-            for i in range(ndim):  # loop over each conditional
+        for i in range(ndim):  # loop over each conditional
+            for j in range(ndim):  # loop over each spatial direction
                 _centraldiff(cdfs[i], dx[j], j, out=H[..., i, j])  # internal points
                 _forwarddiff(cdfs[i], dx[j], j, out=H[..., i, j])  # lower boundary
                 _backwarddiff(cdfs[i], dx[j], j, out=H[..., i, j])  # upper boundary
 
-                # release memory
-                cdfs[i] = None
+            # release memory
+            cdfs[i] = None
 
         # [preparing G]
         for j in range(npars):  # loop over each parameter

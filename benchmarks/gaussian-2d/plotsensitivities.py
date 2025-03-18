@@ -5,6 +5,7 @@
 """
 import itertools
 import numpy
+import torch
 import matplotlib.pyplot as pyplot
 import matplotlib.ticker as mticker
 import matplotlib.colors as mcolors
@@ -258,8 +259,6 @@ def plot_dist(x, vals, figdir):
         extend="neither"
     )
 
-    print("plotting pdf")
-
     # plot
     fig = pyplot.figure(figsize=(2.5, 3.0))
     gs = fig.add_gridspec(1, 1)
@@ -333,13 +332,13 @@ if __name__ == "__main__":
     pyplot.style.use(figdir.parent.joinpath("plot.mplstyle"))
 
     print("loading fullmtx results")
-
-    with numpy.load(figdir.joinpath("fullmtx.meta.npz")) as dset:
-        x, ans, pdfvals = dset["x"], dset["ans"], dset["pdfvals"]
-        params = dset["params"]
-
-    with numpy.load(figdir.joinpath("fullmtx.outs.npz")) as dset:
-        outs = dict(dset)
+    dset = torch.load(figdir.joinpath("fullmtx.dat"))
+    x = dset["x"].numpy()
+    ans = dset["ans"].numpy()
+    pdfvals = dset["pdfvals"].numpy()
+    params = dset["params"].numpy()
+    outs = {alg: torch.stack(val).numpy() for alg, val in dset["outs"].items()}
+    del dset
 
     print("plotting pdf")
     plot_dist(x, pdfvals, figdir)
@@ -348,13 +347,13 @@ if __name__ == "__main__":
     plot_sensitivity(x, ans, params, outs, figdir, "fullmtxcfg")
 
     print("loading diagapprox results")
-
-    with numpy.load(figdir.joinpath("diagapprox.meta.npz")) as dset:
-        x, ans, pdfvals = dset["x"], dset["ans"], dset["pdfvals"]
-        params = dset["params"]
-
-    with numpy.load(figdir.joinpath("diagapprox.outs.npz")) as dset:
-        outs = dict(dset)
+    dset = torch.load(figdir.joinpath("diagapprox.dat"))
+    x = dset["x"].numpy()
+    ans = dset["ans"].numpy()
+    pdfvals = dset["pdfvals"].numpy()
+    params = dset["params"].numpy()
+    outs = {alg: torch.stack(val).numpy() for alg, val in dset["outs"].items()}
+    del dset
 
     print("plotting diagapprox results")
     plot_sensitivity(x, ans, params, outs, figdir, "diagapprox")
