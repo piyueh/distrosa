@@ -35,7 +35,7 @@ class SensitivityBase(torch.nn.Module):
 
     def __init__(self, npars: int, gridlines: Sequence[Tensor], eps: float|Tensor):
 
-        # type hints to make static type checkers happy
+        # type hints to make static type checkers (and TorchScript) happy
         self.gridlines: torch.nn.ParameterList
         self.dx: torch.nn.ParameterList
         self.ndim: int
@@ -43,7 +43,7 @@ class SensitivityBase(torch.nn.Module):
         self.nverts: Tuple[int, ...]
         self.eps: Tensor
         self.eps2: Tensor
-        self._density: Callable[[Tensor, Tensor], Tensor]
+        self.pdf: Callable[[Tensor, Tensor], Tensor]
 
         # mandatory for all torch.nn.Module subclasses
         super().__init__()
@@ -60,7 +60,7 @@ class SensitivityBase(torch.nn.Module):
         self.eps2[:] = eps * 2.0
 
         # dummy; users should register the actual PDF with `.register(...)`
-        self._density = None  # type: ignore
+        self.pdf = lambda x, params: torch.zeros_like(x)
 
         # this is not a real "differentiable" layer
         self.requires_grad_(False)
@@ -77,12 +77,7 @@ class SensitivityBase(torch.nn.Module):
             return a Tensor with a shape of x.shape[:-1]. And for 1D, the function
             should always return a Tensor with a shape of x.shape.
         """
-        self._density = func
-
-    def pdf(self, x: Tensor, params: Tensor) -> Tensor:
-        """Call the underlying PDF function.
-        """
-        return self._density(x, params)
+        self.pdf = func
 
     def forward(self, x: Tensor, params: Tensor) -> Tensor:
         """Calculate the gradient w.r.t. params at space points.

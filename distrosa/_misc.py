@@ -12,6 +12,40 @@ from torch import Tensor  # for type hints
 import torch
 
 
+@torch.jit.script
+def cartesianprod(N: int, device: torch.device) -> Tensor:
+    """Our own implementation of cartesian product for integers.
+
+    PyTorch's `cartesian_prod` does not work with `torch.jit.script` when it cannot
+    infer the dimensions at the compile time. And `torch.jit.script` does not support
+    `itertools.product` will, either. This function is a workaround.
+
+    Arguments
+    ---------
+    N : int
+        Number of dimensions.
+
+    Returns
+    -------
+    Tensor of shape (2**N, N)
+        All possible values of the Cartesian product [0, 1]**N.
+    """
+
+    result = torch.tensor([[0], [1]], dtype=torch.long, device=device)
+
+    for _ in range(1, N):
+        zeros = torch.zeros((result.size(0), 1), dtype=torch.long, device=device)
+        ones = torch.ones((result.size(0), 1), dtype=torch.long, device=device)
+
+        result = torch.cat((
+            torch.cat((result, zeros), dim=1),
+            torch.cat((result, ones), dim=1)
+        ), dim=0)
+
+    return result
+
+
+@torch.jit.script
 def interp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor) -> Tensor:
     """Piecewise linear interpolation to multiple points on a 1D gridline.
 
@@ -61,6 +95,7 @@ def interp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor) -> Tensor:
     return dval
 
 
+@torch.jit.script
 def minterp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor):
     """Multiple 1D piecewise linear interpolation happening at the same time.
 
@@ -103,28 +138,36 @@ def minterp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor):
     return dval.view(xshape)  # return to the original shape of x
 
 
-def interpnd(x: Tensor, verts: Tensor, values: Tensor):
+@torch.jit.unused
+def interpnd(x: Tensor, verts: Sequence[Tensor]|torch.nn.ParameterList, values: Tensor):
     """Piecewise multilinear interpolation to multiple points in N-D space.
 
     This uses the concept the 1D shape function in finie element methods for hypercubes.
     It's mathematically equivalent to piecewise multilinear interpolation but with a
     simpler mathematical description for an easier implementation.
+
+    Notes
+    -----
+    * `len(verts) == values.ndim == N`
+    * `verts[i].ndim == 1` for all i
+    * `values.shape == (len(_) of _ in verts)`
     """
 
     # extract info (so values must be a torch.Tensor)
+    device = x.device
     N = len(verts)  # number of dimensions
     K = [len(v) for v in verts]  # number of vertices in each dimension
     coeff = 2.0**N  # dividing coefficient for the shape functions
 
     # we still want to work with shape (..., N) even for N=1, i.e., 1D
     if N == 1 and x.shape[-1] != 1:
-        x = x.view(*x.shape, 1)
+        x = x.view(x.shape+(1,))
 
     # hypercube indices (note the N is the leading dimension for convenience later)
-    ids = torch.zeros((N,)+x.shape[:-1], dtype=torch.int64)
+    ids = torch.zeros((N,)+x.shape[:-1], dtype=torch.long, device=device)
 
     # local coordinates (in [-1, 1]^N) for points in their hypercubes
-    local = torch.zeros(x.shape[:-1]+(N,))
+    local = torch.zeros(x.shape[:-1]+(N,), device=device)
 
     for i in range(N):  # loop over each dimension
 
@@ -134,21 +177,25 @@ def interpnd(x: Tensor, verts: Tensor, values: Tensor):
         # identify the hypercube's index in each dimension the points belong to
         tmp = torch.searchsorted(vi, x[..., i], side="right") - 1
         ids[i, ...] = torch.clip(tmp, 0, K[i]-2)
+        tmp = None
 
         # calculate the local coordinates for points in their hypercubes
         tmp = (x[..., i] - vi[ids[i, ...]]) / (vi[ids[i, ...]+1] - vi[ids[i, ...]])
         local[..., i] = tmp * 2.0 - 1.0  # shift to [-1, 1]
+        tmp = None
 
     # build shape functions
-    out = torch.zeros(x.shape[:-1])
-    for key in itertools.product([0, 1], repeat=N):  # loop over each shape function
+    out = torch.zeros(x.shape[:-1], device=x.device)
+
+    # loop each shape function
+    for key in itertools.product([0, 1], repeat=N):
 
         # node corresponds to this shape function for all points in x
-        node = torch.asarray(key, dtype=torch.int64)
-        node = ids + node.view((N,)+tuple(1 for _ in range(x.ndim-1)))
+        node = torch.asarray(key, dtype=torch.long, device=device)
+        node = ids + node.view((N,)+(1,)*(x.ndim-1))
 
         # shape function's values at all points in x
-        shapevals = torch.zeros(x.shape[:-1])
+        shapevals = torch.ones(x.shape[:-1], device=x.device)
         for k in range(N):
             shapevals = shapevals * (1.0 - local[..., k] * (-1)**key[k])
 
@@ -159,20 +206,14 @@ def interpnd(x: Tensor, verts: Tensor, values: Tensor):
     return out  # should have shape x.shape[:-1]
 
 
-def getcdf(
-    density: Callable[[Tensor, Tensor], Tensor],
-    x: Tensor,
-    params: Tensor,
-    h: Tensor
-) -> tuple[Tensor, Tensor]:
+@torch.jit.script
+def getcdf(pdfvals: Tensor, h: Tensor) -> tuple[Tensor, Tensor]:
     """Get the normalized CDF and the normalization factor.
 
     Mostly for internal use.
     """
 
-    two = torch.tensor(2.0, dtype=x.dtype, device=x.device)
-
-    pdfvals = density(x, params).view(x.shape[:-1])  # some 1D PDF return shape (Nx, 1)
+    two = torch.tensor(2.0, dtype=pdfvals.dtype, device=pdfvals.device)
 
     vals = torch.zeros_like(pdfvals)
     torch.add(pdfvals[..., 1:], pdfvals[..., :-1], out=vals[..., 1:])
@@ -185,40 +226,55 @@ def getcdf(
     return vals, norm
 
 
+@torch.jit.unused
 def getconditionals(
-    func: Callable[[Tensor, Tensor], Tensor],
-    verts: Sequence[Tensor],
-    dx: Sequence[Tensor],
-    params: Tensor,
-):
+    pdfvals: Tensor, h: Sequence[Tensor]|torch.nn.ParameterList,
+    cpdfs: Sequence[Tensor]|torch.nn.ParameterList|None = None,
+    ccdfs: Sequence[Tensor]|torch.nn.ParameterList|None = None,
+) -> tuple[
+    Sequence[Tensor]|torch.nn.ParameterList,
+    Sequence[Tensor]|torch.nn.ParameterList
+]:
     """Get the 1D conditional PDF and CDF values at vertices for N-D distributions.
+
+    This function assume `pdfvals` has the shape to the background rectilinear grid.
 
     Arguments
     ---------
-    func : Callable, (x: Tensor] params: Tensor] -> pdfvals: Tensor
-    verts : Sequence[Tensor]
+    pdfvals : Tensor
+        Discrete joint PDF values at vertices.
     dx : Sequence[Tensor]
-    params : Tensor
+        Cell sizes along each conditional direction.
+    cpdfs : Sequence[Tensor], optional
+        All conditional (normalized) PDFs. If None, allocate new memory space.
+    ccdfs : Sequence[Tensor], optional
+        All conditional (normalized) CDFs. If None, allocate new memory space.
 
     Returns
     -------
-    pdfs : Sequence[Tensor]
-    cdfs : Sequence[Tensor]
+    cpdfs : Sequence[Tensor]
+        All conditional (normalized) PDFs.
+    ccdfs : Sequence[Tensor]
+        All conditional (normalized) CDFs.
+
+    Notes
+    -----
+    * `pdfvals.ndim = len(dx)`
+    * `pdfvals.shape = [len(dxi) for dxi in dx]`
+    * `len(pdfs) = len(cdfs) = len(dx) = pdfvals.ndim`
+    * `pdfs[i].shape = cdfs[i].shape = pdfvals.shape` for i=0, 1, ..., pdfvals.ndim-1
     """
 
-    # extract info (so params must already be a torch.Tensor)
-    N = len(verts)  # number of dimensions
-    K = [len(v) for v in verts]  # number of vertices in each dimension
+    # aliases for our convenience
+    N = pdfvals.ndim  # number of dimensions
+    K = pdfvals.shape  # number of vertices in each dimension
 
-    # compute joint PDF values at vertices
-    if N == 1:
-        eta = func(verts[0], params)  # shape: (K_1,)
-    else:
-        # shape: (K_1, K_2, ..., K_N)
-        eta = func(torch.stack(torch.meshgrid(*verts, indexing="ij"), -1), params)
+    # do lists work with torch.jit.script?
+    if cpdfs is None:
+        cpdfs = [torch.zeros_like(pdfvals) for _ in range(N)]
 
-    pdfs = []
-    cdfs = []
+    if ccdfs is None:
+        ccdfs = [torch.zeros_like(pdfvals) for _ in range(N)]
 
     # loop over each 1D conditional direction
     for i in range(N):
@@ -239,28 +295,31 @@ def getconditionals(
         normloc[i] = slice(-1, None)
         normloc = tuple(normloc)
 
-        tmp = torch.zeros(K)
-        torch.add(eta[low], eta[high], out=tmp[high])
-        torch.multiply(tmp[high], dx[i][bcast], out=tmp[high])
-        torch.divide(tmp[high], 2.0, out=tmp[high])  # type: ignore
-        torch.cumsum(tmp, i, out=tmp)
+        ccdfs[i][low] = 0.0
+        torch.add(pdfvals[low], pdfvals[high], out=ccdfs[i][high])
+        torch.multiply(ccdfs[i][high], h[i][bcast], out=ccdfs[i][high])
+        torch.divide(ccdfs[i][high], 2.0, out=ccdfs[i][high])  # type: ignore
+        torch.cumsum(ccdfs[i], i, out=ccdfs[i])
+
+        # workaround for pytorch, which needs a hard copy....
+        norms = ccdfs[i][normloc].clone()
 
         # append conditional PDF
-        pdfs.append(eta/tmp[normloc])
+        cpdfs[i][...] = pdfvals / norms
 
         # reuse memory space for conditional CDF and append it
-        torch.divide(tmp, tmp[normloc], out=tmp)
-        cdfs.append(tmp)
+        torch.divide(ccdfs[i], norms, out=ccdfs[i])
 
-    return pdfs, cdfs
+    return cpdfs, ccdfs
 
 
+@torch.jit.unused
 def centraldiff(vals: Tensor, dh: Tensor, axis: int, out=None):
     """Central difference for 1st-order derivatives.
     """
 
     if out is None:
-        out = _np.zeros_like(vals)
+        out = torch.zeros_like(vals)
 
     N = vals.ndim
 
@@ -289,12 +348,13 @@ def centraldiff(vals: Tensor, dh: Tensor, axis: int, out=None):
     return out
 
 
+@torch.jit.unused
 def forwarddiff(vals: Tensor, dh: Tensor, axis: int, out=None):
     """Second-order accurate forward difference for 1st-order derivatives.
     """
 
     if out is None:
-        out = _np.zeros_like(vals)
+        out = torch.zeros_like(vals)
 
     N = vals.ndim
 
@@ -323,12 +383,13 @@ def forwarddiff(vals: Tensor, dh: Tensor, axis: int, out=None):
     return out
 
 
+@torch.jit.unused
 def backwarddiff(vals: Tensor, dh: Tensor, axis: int, out=None):
     """Second-order accurate backward difference for 1st-order derivatives.
     """
 
     if out is None:
-        out = _np.zeros_like(vals)
+        out = torch.zeros_like(vals)
 
     N = vals.ndim
 

@@ -43,8 +43,8 @@ class Sensitivity1D(SensitivityBase):
         dx = self.dx[0]  # this is 1D
         npars = self.npars
 
-        # normalized PDF at x
-        f_at_x = self.pdf(x, params) / _getcdf(self.pdf, v.view(-1, 1), params, dx)[1]
+        # get normalized PDF at x
+        f_at_x = self.pdf(x, params) / _getcdf(self.pdf(v, params), dx)[1]
 
         # will be holding d F / d params[j] for all j
         gj = []
@@ -54,10 +54,10 @@ class Sensitivity1D(SensitivityBase):
             _pars = params.clone()
 
             _pars[j] = params[j] + self.eps[j]
-            _cdfp = _getcdf(self.pdf, v.view(-1, 1), _pars, dx)[0]
+            _cdfp = _getcdf(self.pdf(v, _pars), dx)[0]
 
             _pars[j] = params[j] - self.eps[j]
-            _cdfm = _getcdf(self.pdf, v.view(-1, 1), _pars, dx)[0]
+            _cdfm = _getcdf(self.pdf(v, _pars), dx)[0]
 
             # reusing the memory space of `_cdfp` to hold the numerical derivatives
             torch.subtract(_cdfp, _cdfm, out=_cdfp)
@@ -65,6 +65,11 @@ class Sensitivity1D(SensitivityBase):
 
             # let's trust that CuPy's interpolation is efficient enough for now
             gj.append(_interp(x, v, dx, _cdfp))
+
+            # clear memory
+            _pars = None
+            _cdfp = None
+            _cdfm = None
 
         # stack the results to have shape x.shape+(P,)
         gj = torch.stack(gj, -1)

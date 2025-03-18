@@ -8,6 +8,8 @@ to observational data.
 
 ## Caveats
 
+### Floating Precision
+
 The temporary tensors created and used during all calculations do not explicitly specify
 the floating precision, and will default to 32bit floats if not specified (because this
 is PyTorch's default).
@@ -24,6 +26,23 @@ the precision for these temporary tensors.
 
 Using `.to(torch.float64)` after a PyTorch module is created will not help either, as
 these temporary or hidden tensors are created with `float32` initially.
+
+### Vectorization
+
+If using `torch.autograd.functional.jacobian` to get the Jacobian matrix of multiple
+points with respect to the parameters of the distribution, this function will apply
+the gradient calculation point by point.
+This means it will not enjoy the performance benefits of vectorization.
+This is due to that PyTorch does not have real automatic differentiation of vectorized
+output with respect to vectorized input.
+
+On the other hand, if using some thing like `loss.backward()` to get the gradient of a
+scalar loss with respect to the parameters of the distribution, then it will be fine.
+
+### `torch.jit.script`
+
+Currently, only `Sensitivity1D`, `SensitivityND`, and `SensitivityDDDiag` works with
+`torch.jit.script`.
 
 ## Installation:
 

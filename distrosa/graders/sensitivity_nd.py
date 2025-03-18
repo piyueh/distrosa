@@ -72,15 +72,13 @@ class SensitivityND(SensitivityBase):
         else:
             J = self._backend(_x, params)
 
-        return J.view(*x.shape, self.npars)  # shape: (..., ndim, npars)
+        return J.view(x.shape+(self.npars,))  # shape: (..., ndim, npars)
 
     def _backend(self, x: Tensor, params: Tensor) -> Tensor:
         """Calculate the gradient at space points.
         """
 
         # aliases/references for our convenience
-        v = self.gridlines
-        dx = self.dx
         npars = self.npars
         ndim = self.ndim
         nverts = self.nverts
@@ -91,42 +89,50 @@ class SensitivityND(SensitivityBase):
         epsx2 = self.epsx2
 
         # empty containers
-        H = torch.zeros(nx+(ndim, ndim))
-        G = torch.zeros(nx+(ndim, npars))
-        J = torch.zeros(nx+(ndim, npars))
+        H = torch.zeros(nx+(ndim, ndim), device=self.gridlines[0].device)
+        G = torch.zeros(nx+(ndim, npars), device=self.gridlines[0].device)
+        J = torch.zeros(nx+(ndim, npars), device=self.gridlines[0].device)
 
         # construct H and G
-        for i in range(ndim):  # looping over 1D confitionals
+        for i, (vi, dxi) in enumerate(zip(self.gridlines, self.dx)):  # i-th conditional
 
             # expand and copy (NOTE: memory inefficient!!)
-            xk = x.view(nx+(1, ndim)).expand(nx+(nverts[i], ndim))
+            xk = x.view(nx+(1, ndim)).expand(nx+(nverts[i], ndim)).clone()
 
             # conditioning
-            xk[..., i] = v[i]  # xk shape: (nx, nverts[i], ndim)
+            xk[..., i] = vi  # xk shape: (nx, nverts[i], ndim)
 
             # construct H
             for j in range(ndim):  # looping over spatial dimensions
 
                 # keep a copy of the original data points' values
-                xj = x[..., j].clone()  # xj shape (nx,)
+                if i == j:
+                    xj = vi.clone().view((1, nverts[i])).expand(nx+(nverts[i],))
+                else:
+                    xj = x[..., j].clone().view(nx+(1,)).expand(nx+(nverts[i],))
 
                 # positive perturb the j-th spatial dimension
                 torch.add(xj, epsx[j], out=xk[..., j])
-                cdfp, _ = _getcdf(self.pdf, xk, params, dx[i])
+                cdfp = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
 
                 # negative perturb the j-th spatial dimension
                 torch.subtract(xj, epsx[j], out=xk[..., j])
-                cdfm, _ = _getcdf(self.pdf, xk, params, dx[i])
+                cdfm = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
 
                 # reusing cdfp mem space; cdfp = d F_i / d x_j
                 torch.subtract(cdfp, cdfm, out=cdfp)
                 torch.divide(cdfp, epsx2[j], out=cdfp)  # shape (nx, nverts[i])
 
                 # multiple 1D interp; (nx,), (nverts[i],), (nx, nverts[i]) -> (nx,)
-                H[..., i, j] = _minterp(x[..., i], v[i], dx[i], cdfp)
+                H[..., i, j] = _minterp(x[..., i], vi, dxi, cdfp)
 
                 # restore xk
-                xk[..., j] = v[i] if i == j else xj.view(nx+(1,))
+                xk[..., j] = xj
+
+                # release memory
+                cdfm = None
+                cdfp = None
+                xj = None
 
             # construct G
             for j in range(npars):  # looping over parameters
@@ -135,18 +141,26 @@ class SensitivityND(SensitivityBase):
 
                 # params[j] += eps
                 pars[j] = params[j] + eps[j]
-                cdfp, _ = _getcdf(self.pdf, xk, pars, dx[i])
+                cdfp = _getcdf(self.pdf(xk, pars).view(xk.shape[:-1]), dxi)[0]
 
                 # params[j] -= eps
                 pars[j] = params[j] - eps[j]
-                cdfm, _ = _getcdf(self.pdf, xk, pars, dx[i])
+                cdfm = _getcdf(self.pdf(xk, pars).view(xk.shape[:-1]), dxi)[0]
 
                 # reusing cdfp mem space; cdfp = d F_i / d param_j
                 torch.subtract(cdfp, cdfm, out=cdfp)
                 torch.divide(cdfp, eps2[j], out=cdfp)  # shape (nx, nverts[i])
 
                 # multiple 1D interp; (nx,), (nverts[i],), (nx, nverts[i]) -> (nx,)
-                G[..., i, j] = _minterp(x[..., i], v[i], dx[i], cdfp)
+                G[..., i, j] = _minterp(x[..., i], vi, dxi, cdfp)
+
+                # release memory
+                cdfm = None
+                cdfp = None
+                pars = None
+
+            # release memory
+            xk = None
 
         # solve the linear systems (avoid singular matrices)
         valid = torch.linalg.matrix_rank(H) >= ndim

@@ -66,11 +66,17 @@ class SensitivityNDInterp(SensitivityBase):
         eps2 = self.eps2
 
         # initialize arrays
-        H = torch.zeros(nverts+(ndim, ndim))
-        G = torch.zeros(nverts+(ndim, npars))
+        H = torch.zeros(nverts+(ndim, ndim), device=self.gridlines[0].device)
+        G = torch.zeros(nverts+(ndim, npars), device=self.gridlines[0].device)
 
         # get all 1D conditional CDFs at all N-D vertices
-        cdfs = _getconditionals(self.pdf, v, dx, params)[1]  # type: ignore
+        cdfs = _getconditionals(
+            self.pdf(
+                torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                params
+            ).view(nverts),
+            dx
+        )[1]  # only needs normalized conditional CDFs
 
         # [preparing H]
         for j in range(ndim):  # loop over each spatial direction
@@ -78,17 +84,31 @@ class SensitivityNDInterp(SensitivityBase):
                 _centraldiff(cdfs[i], dx[j], j, out=H[..., i, j])  # internal points
                 _forwarddiff(cdfs[i], dx[j], j, out=H[..., i, j])  # lower boundary
                 _backwarddiff(cdfs[i], dx[j], j, out=H[..., i, j])  # upper boundary
-        del cdfs
+
+                # release memory
+                cdfs[i] = None
 
         # [preparing G]
         for j in range(npars):  # loop over each parameter
             perturb = params.clone()
 
             perturb[j] = params[j]+ eps[j]
-            cdfsp = _getconditionals(self.pdf, v, dx, perturb)[1]  # type: ignore
+            cdfsp = _getconditionals(
+                self.pdf(
+                    torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                    perturb
+                ).view(nverts),
+                dx
+            )[1]  # type: ignore
 
             perturb[j] = params[j]- eps[j]
-            cdfsm = _getconditionals(self.pdf, v, dx, perturb)[1]  # type: ignore
+            cdfsm = _getconditionals(
+                self.pdf(
+                    torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                    perturb
+                ).view(nverts),
+                dx
+            )[1]  # type: ignore
 
             for i in range(ndim):  # loop over each conditional
                 G[..., i, j] = (cdfsp[i] - cdfsm[i]) / eps2[j]
@@ -96,6 +116,9 @@ class SensitivityNDInterp(SensitivityBase):
                 # immediately release the memory
                 cdfsp[i] = None
                 cdfsm[i] = None
+
+            # release memory
+            perturb = None
 
         # solve the linear systems (avoid singular matrices)
         valid = torch.linalg.matrix_rank(H) >= ndim
@@ -119,13 +142,13 @@ class SensitivityNDInterp(SensitivityBase):
         _x = x.view(-1, self.ndim)
 
         # to hold the outputs
-        Jx = torch.zeros(_x.shape+(self.npars,))
+        Jx = torch.zeros(_x.shape+(self.npars,), device=x.device)
 
         for i in range(self.ndim):
             for j in range(self.npars):
                 Jx[..., i, j] = _interpnd(_x, self.gridlines, self._J[..., i, j])
 
-        return Jx.view(*x.shape, self.npars)  # restore the original shape
+        return Jx.view(x.shape+(self.npars,))  # restore the original shape
 
     def needupdate(self, params: Tensor) -> bool:
         """Check if the internal data needs to be updated.
@@ -141,7 +164,5 @@ class SensitivityNDInterp(SensitivityBase):
             Whether the internal data needs to be updated.
         """
 
-        if not torch.allclose(params, self._params, 0, 1e-9, True):
-            return True
-
-        return False
+        # we may have other criteria in the future
+        return (not torch.allclose(params, self._params, 0.0, 1e-9, True))

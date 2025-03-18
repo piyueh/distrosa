@@ -53,15 +53,13 @@ class SensitivityNDDiag(SensitivityBase):
         else:
             J = self._backend(_x, params)
 
-        return J.view(*x.shape, self.npars)  # shape: (..., ndim, npars)
+        return J.view(x.shape+(self.npars,))  # shape: (..., ndim, npars)
 
     def _backend(self, x: Tensor, params: Tensor) -> Tensor:
         """Calculate the gradient at space points.
         """
 
         # aliases/references for our convenience
-        v = self.gridlines
-        dx = self.dx
         npars = self.npars
         ndim = self.ndim
         nverts = self.nverts
@@ -70,16 +68,16 @@ class SensitivityNDDiag(SensitivityBase):
         eps2 = self.eps2
 
         # empty containers
-        J = torch.zeros(nx+(ndim, npars))
+        J = torch.zeros(nx+(ndim, npars), device=self.gridlines[0].device)
 
         # construct \partial F_i / \partial param_j
-        for i in range(ndim):  # loop over 1D conditionals
+        for i, (vi, dxi) in enumerate(zip(self.gridlines, self.dx)):  # i-th conditional
 
             # expand and copy (NOTE: memory inefficient!!)
-            xk = x.view(nx+(1, ndim)).expand(nx+(nverts[i], ndim))
+            xk = x.view(nx+(1, ndim)).expand(nx+(nverts[i], ndim)).clone()
 
             # conditioning
-            xk[..., i] = v[i]  # xk shape: (nx, nverts[i], ndim)
+            xk[..., i] = vi  # xk shape: (nx, nverts[i], ndim)
 
             for j in range(npars):  # loop over parameters
 
@@ -87,29 +85,39 @@ class SensitivityNDDiag(SensitivityBase):
 
                 # params[j] += eps
                 pars[j] = params[j] + eps[j]
-                cdfp, _ = _getcdf(self.pdf, xk, pars, dx[i])
+                cdfp = _getcdf(self.pdf(xk, pars).view(xk.shape[:-1]), dxi)[0]
 
                 # params[j] -= eps
                 pars[j] = params[j] - eps[j]
-                cdfm, _ = _getcdf(self.pdf, xk, pars, dx[i])
+                cdfm = _getcdf(self.pdf(xk, pars).view(xk.shape[:-1]), dxi)[0]
 
                 # reusing cdfp mem space; cdfp = d F_i / d param_j
                 torch.subtract(cdfp, cdfm, out=cdfp)
                 torch.divide(cdfp, eps2[j], out=cdfp)  # shape (Nx, Ki)
 
                 # 1D interpolation; shape change: (Nx,), (Ki,), (Nx, Ki) -> (Nx,)
-                J[..., i, j] = _minterp(x[..., i], v[i], dx[i], cdfp)
+                J[..., i, j] = _minterp(x[..., i], vi, dxi, cdfp)
+
+                # clear memory
+                pars = None
+                cdfp = None
+                cdfm = None
 
             # we don't need to normalize the CDF, just need the normalization factor
-            _, norm = _getcdf(self.pdf, xk, params, dx[i])
+            norm = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[1]
 
             # calculate normalized PDF at x directly (rather than via interpolation)
-            _pdf = self.pdf(x, params).view(nx)  # some 1D PDF returns (Nx, 1)
-            torch.divide(_pdf, norm, out=_pdf)
+            pdfvals = self.pdf(x, params).view(nx)  # some 1D PDF returns (Nx, 1)
+            torch.divide(pdfvals, norm, out=pdfvals)
 
             # scale J[..., i, :] by -1 / f(x)
-            torch.divide(J[..., i, :], _pdf.view(nx+(1,)), out=J[..., i, :])
+            torch.divide(J[..., i, :], pdfvals.view(nx+(1,)), out=J[..., i, :])
             torch.negative(J[..., i, :], out=J[..., i, :])
+
+            # release memory
+            xk = None
+            pdfvals = None
+            norm = None
 
         # return shape: (nx, ndim, npars)
         return J

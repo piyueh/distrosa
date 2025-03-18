@@ -42,14 +42,17 @@ class SensitivityNDDiagInterp(SensitivityBase):
 
         # to make static type checkers happy
         self._params: Tensor
-        self._deltas: torch.nn.ParameterDict
+        self._deltas: torch.nn.ParameterList
         self._pdfvals: torch.nn.ParameterList
 
         # data for interpolations
-        self._deltas = torch.nn.ParameterDict({
-            f"{(i, j)}": torch.zeros(self.nverts)
-            for (i, j) in itertools.product(range(self.ndim), range(self.npars))
-        })
+        self._deltas = torch.nn.ParameterList([
+            torch.nn.ParameterList([
+                torch.zeros(self.nverts)
+                for _2 in range(self.ndim)
+            ])
+            for _1 in range(self.npars)
+        ])
 
         self._pdfvals = torch.nn.ParameterList([
             torch.zeros(self.nverts) for _ in range(self.ndim)
@@ -76,30 +79,47 @@ class SensitivityNDDiagInterp(SensitivityBase):
         eps2 = self.eps2
 
         # get all 1D conditional PDFs at all N-D vertices
-        data = _getconditionals(self.pdf, v, dx, params)[0]  # type: ignore
-        for i in range(ndim):
-            self._pdfvals[i][...] = data[i]
-            data[i] = None  # immediately release the memory
+        _getconditionals(
+            self.pdf(
+                torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                params
+            ).view(nverts),
+            dx,
+            cpdfs=self._pdfvals
+        )
 
         # get all 1D conditional CDFs at all N-D vertices under perturbed parameters
         for j in range(npars):
             perturb = params.clone()
 
             perturb[j] = params[j]+ eps[j]
-            cdfsp = _getconditionals(self.pdf, v, dx, perturb)[1]  # type: ignore
+            _getconditionals(
+                self.pdf(
+                    torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                    perturb
+                ).view(nverts),
+                dx,
+                ccdfs=self._deltas[j]
+            )
 
             perturb[j] = params[j]- eps[j]
-            cdfsm = _getconditionals(self.pdf, v, dx, perturb)[1]  # type: ignore
+            cdfsm = _getconditionals(
+                self.pdf(
+                    torch.stack(torch.meshgrid(*v, indexing="ij"), -1),
+                    perturb
+                ).view(nverts),
+                dx
+            )[1]
 
             for i in range(ndim):
-                self._deltas[f"{(i, j)}"][...] = (cdfsp[i] - cdfsm[i]) / eps2[j]
+                torch.subtract(self._deltas[j][i], cdfsm[i], out=self._deltas[j][i])
+                torch.divide(self._deltas[j][i], eps2[j], out=self._deltas[j][i])
 
                 # immediately release the memory
-                cdfsp[i] = None
-                cdfsm[i] = None
+                cdfsm[i] = None  # type: ignore
 
         # link the attributes to the constructed values; no-copy, just referencing
-        self._params[...] = params
+        self._params[...] = params.detach()
 
     def forward(self, x: Tensor, params: Tensor) -> Tensor:
         # docstring is inherited from SensitivityBase.forward
@@ -112,15 +132,15 @@ class SensitivityNDDiagInterp(SensitivityBase):
         _x = x.view(-1, self.ndim)
 
         # to hold the outputs
-        J = torch.zeros(_x.shape+(self.npars,))
+        J = torch.zeros(_x.shape+(self.npars,), device=x.device)
 
         for i in range(self.ndim):
+            fx = _interpnd(_x, self.gridlines, self._pdfvals[i])
             for j in range(self.npars):
-                fx = _interpnd(_x, self.gridlines, self._pdfvals[i])
-                derv = _interpnd(_x, self.gridlines, self._deltas[f"{(i, j)}"])
+                derv = _interpnd(_x, self.gridlines, self._deltas[j][i])
                 J[..., i, j] = - derv / fx
 
-        return J.view(*x.shape, self.npars)
+        return J.view(x.shape+(self.npars,))  # restore the original shape
 
     def needupdate(self, params: Tensor) -> bool:
         """Check if the internal data needs to be updated.
@@ -136,7 +156,5 @@ class SensitivityNDDiagInterp(SensitivityBase):
             Whether the internal data needs to be updated.
         """
 
-        if not torch.allclose(params, self._params, 0, 1e-9, True):
-            return True
-
-        return False
+        # we may have other criteria in the future
+        return (not torch.allclose(params, self._params, 0.0, 1e-9, True))
