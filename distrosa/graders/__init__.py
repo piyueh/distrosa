@@ -27,13 +27,27 @@ class SensitivityBase(torch.nn.Module):
         Finite difference step size(s). If a scalar, it is used for all parameters.
         Otherwise, it must have the same length as `params`.
 
+    pdf : None or Callable, (x: Tensor, params: Tensor) -> pdfvals: Tensor
+        Parametric probability density function (PDF). Potentially unnormalized.
+        Broadcast should be supported for arbitrary shapes of `x`. Except for 1D,
+        the function should expect x.shape[-1] to be the dimensionality and should
+        return a Tensor with a shape of x.shape[:-1]. And for 1D, the function
+        should always return a Tensor with a shape of x.shape. If `pdf` is `None`,
+        users should later register it with `.register(...)`. Default is `None`.
+
     Notes
     -----
     * All init inputs are hard copied.
     * To make code more readable, not much sanity checks are done.
     """
 
-    def __init__(self, npars: int, gridlines: Sequence[Tensor], eps: float|Tensor):
+    def __init__(
+        self,
+        npars: int,
+        gridlines: Sequence[Tensor],
+        eps: float|Tensor,
+        pdf: None | Callable[[Tensor, Tensor], Tensor] = None,
+    ):
 
         # type hints to make static type checkers (and TorchScript) happy
         self.gridlines: torch.nn.ParameterList
@@ -43,7 +57,7 @@ class SensitivityBase(torch.nn.Module):
         self.nverts: Tuple[int, ...]
         self.eps: Tensor
         self.eps2: Tensor
-        self.pdf: Callable[[Tensor, Tensor], Tensor]
+        self.pdf: Callable[[Tensor, Tensor], Tensor] | None
 
         # mandatory for all torch.nn.Module subclasses
         super().__init__()
@@ -59,8 +73,8 @@ class SensitivityBase(torch.nn.Module):
         self.eps[:] = eps
         self.eps2[:] = eps * 2.0
 
-        # dummy; users should register the actual PDF with `.register(...)`
-        self.pdf = lambda x, params: torch.zeros_like(x)
+        # if pdf is None, users should later register one with `.register(...)`
+        self.pdf = pdf
 
         # this is not a real "differentiable" layer
         self.requires_grad_(False)

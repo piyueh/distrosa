@@ -6,11 +6,12 @@ $ python fullmtx.py
 $ python diagapprox.py
 ```
 
-The total execution time is about 10 minutes using NVIDIA GeForce RTX 4070 (12GB RAM).
+The total execution time is less than 10 minutes using NVIDIA GeForce RTX 4070 (12GB
+RAM).
 And the peak GPU RAM consumption is about 9GB.
-These two commands will create the `figs` directory and save several `.npz` files in it.
+These two commands will create the `figs` directory and save two `.dat` files in it.
 
-If no CuPy is found, the scripts will fall back to CPU execution.
+If no GPU is found, the scripts will fall back to CPU execution.
 However, CPU runs are not recommended, unless either you're patient or you lower down
 the number of points in the scripts.
 No estimation of execution time is available for CPU runs.

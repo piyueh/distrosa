@@ -30,15 +30,29 @@ class SensitivityND(SensitivityBase):
         Finite difference step size(s). If a scalar, it is used for all parameters.
         Otherwise, it must have the same length as `params`.
 
+    pdf : None or Callable, (x: Tensor, params: Tensor) -> pdfvals: Tensor
+        Parametric probability density function (PDF). Potentially unnormalized.
+        Broadcast should be supported for arbitrary shapes of `x`. Except for 1D,
+        the function should expect x.shape[-1] to be the dimensionality and should
+        return a Tensor with a shape of x.shape[:-1]. And for 1D, the function
+        should always return a Tensor with a shape of x.shape. If `pdf` is `None`,
+        users should later register it with `.register(...)`. Default is `None`.
+
     Notes
     -----
     * All init inputs are hard copied.
     * To make code more readable, not much sanity checks are done.
     """
 
-    def __init__(self, npars: int, gridlines: Sequence[Tensor], eps: float|Tensor):
+    def __init__(
+        self,
+        npars: int,
+        gridlines: Sequence[Tensor],
+        eps: float | Tensor,
+        pdf: None | Callable[[Tensor, Tensor], Tensor] = None,
+    ):
 
-        super().__init__(npars, gridlines, eps)
+        super().__init__(npars, gridlines, eps, pdf)
 
         # type hints to make static type checkers happy
         self.epsx: Tensor
@@ -107,32 +121,42 @@ class SensitivityND(SensitivityBase):
 
                 # keep a copy of the original data points' values
                 if i == j:
-                    xj = vi.clone().view((1, nverts[i])).expand(nx+(nverts[i],))
+                    # no need for normalize CDF; only need the normalization factor
+                    norm = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[1]
+
+                    # calculate normalized PDF at x directly
+                    torch.divide(self.pdf(x, params).view(nx), norm, out=H[..., i, j])
+                    norm = None
                 else:
                     xj = x[..., j].clone().view(nx+(1,)).expand(nx+(nverts[i],))
 
-                # positive perturb the j-th spatial dimension
-                torch.add(xj, epsx[j], out=xk[..., j])
-                cdfp = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
+                    # alias
+                    vj = self.gridlines[j]
 
-                # negative perturb the j-th spatial dimension
-                torch.subtract(xj, epsx[j], out=xk[..., j])
-                cdfm = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
+                    # positive perturb the j-th spatial dimension
+                    torch.add(xj, epsx[j], out=xk[..., j])
+                    torch.clip(xk[..., j], vj[0], vj[-1], out=xk[..., j])
+                    cdfp = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
 
-                # reusing cdfp mem space; cdfp = d F_i / d x_j
-                torch.subtract(cdfp, cdfm, out=cdfp)
-                torch.divide(cdfp, epsx2[j], out=cdfp)  # shape (nx, nverts[i])
+                    # negative perturb the j-th spatial dimension
+                    torch.subtract(xj, epsx[j], out=xk[..., j])
+                    torch.clip(xk[..., j], vj[0], vj[-1], out=xk[..., j])
+                    cdfm = _getcdf(self.pdf(xk, params).view(xk.shape[:-1]), dxi)[0]
 
-                # multiple 1D interp; (nx,), (nverts[i],), (nx, nverts[i]) -> (nx,)
-                H[..., i, j] = _minterp(x[..., i], vi, dxi, cdfp)
+                    # reusing cdfp mem space; cdfp = d F_i / d x_j
+                    torch.subtract(cdfp, cdfm, out=cdfp)
+                    torch.divide(cdfp, epsx2[j], out=cdfp)  # shape (nx, nverts[i])
 
-                # restore xk
-                xk[..., j] = xj
+                    # multiple 1D interp; (nx,), (nverts[i],), (nx, nverts[i]) -> (nx,)
+                    H[..., i, j] = _minterp(x[..., i], vi, dxi, cdfp)
 
-                # release memory
-                cdfm = None
-                cdfp = None
-                xj = None
+                    # restore xk
+                    xk[..., j] = xj
+
+                    # release memory
+                    cdfm = None
+                    cdfp = None
+                    xj = None
 
             # construct G
             for j in range(npars):  # looping over parameters

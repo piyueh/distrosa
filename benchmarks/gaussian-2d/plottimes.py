@@ -5,6 +5,7 @@
 """
 import itertools
 import numpy
+import torch
 import matplotlib.pyplot as pyplot
 
 
@@ -61,20 +62,16 @@ if __name__ == "__main__":
     pyplot.style.use(figdir.parent.joinpath("plot.mplstyle"))
 
     print("loading fullmtx results")
-
-    with numpy.load(figdir.joinpath("fullmtx.meta.npz")) as dset:
-        nvs = dset["nvs"]
-
-    with numpy.load(figdir.joinpath("fullmtx.times.npz")) as dset:
-        costs = dict(dset)
+    dset = torch.load(figdir.joinpath("fullmtx.dat"))
+    nvs = dset["nvs"]
+    costs = dset["times"]
+    del dset
 
     print("loading diagapprox results")
-
-    with numpy.load(figdir.joinpath("diagapprox.meta.npz")) as dset:
-        nvs = dset["nvs"]
-
-    with numpy.load(figdir.joinpath("diagapprox.times.npz")) as dset:
-        costs.update(dict(dset))
+    dset = torch.load(figdir.joinpath("diagapprox.dat"))
+    nvs = dset["nvs"]
+    costs.update(dset["times"])
+    del dset
 
     print("plotting")
     plot_costs(nvs, costs, figdir)

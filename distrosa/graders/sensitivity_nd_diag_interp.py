@@ -30,15 +30,29 @@ class SensitivityNDDiagInterp(SensitivityBase):
         Finite difference step size(s). If a scalar, it is used for all parameters.
         Otherwise, it must have the same length as `params`.
 
+    pdf : None or Callable, (x: Tensor, params: Tensor) -> pdfvals: Tensor
+        Parametric probability density function (PDF). Potentially unnormalized.
+        Broadcast should be supported for arbitrary shapes of `x`. Except for 1D,
+        the function should expect x.shape[-1] to be the dimensionality and should
+        return a Tensor with a shape of x.shape[:-1]. And for 1D, the function
+        should always return a Tensor with a shape of x.shape. If `pdf` is `None`,
+        users should later register it with `.register(...)`. Default is `None`.
+
     Notes
     -----
     * All init inputs are hard copied.
     * To make code more readable, not much sanity checks are done.
     """
 
-    def __init__(self, npars: int, gridlines: Sequence[Tensor], eps: float|Tensor):
+    def __init__(
+        self,
+        npars: int,
+        gridlines: Sequence[Tensor],
+        eps: float | Tensor,
+        pdf: None | Callable[[Tensor, Tensor], Tensor] = None,
+    ):
 
-        super().__init__(npars, gridlines, eps)
+        super().__init__(npars, gridlines, eps, pdf)
 
         # to make static type checkers happy
         self._params: Tensor

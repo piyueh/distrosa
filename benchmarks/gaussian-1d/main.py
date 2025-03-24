@@ -7,7 +7,7 @@ import time
 import itertools
 import torch
 import distrosa
-from distrosa.samplers.gaussian_1d import gaussian_pdf_1d
+from distrosa.utils.gaussian_1d_sampler import gaussian_1d_pdf
 
 
 # let the default floating precision to be 64bit
@@ -44,15 +44,14 @@ def run(params, bounds, eps, nvs, algs, res=8192):
         verts = torch.linspace(bounds[0], bounds[1], nv).to(device)
 
         # note that `verts` needs to be a list
-        grader = algcls[alg](len(params), [verts,], eps).to(device)
-        grader.register(gaussian_pdf_1d)
+        grader = algcls[alg](len(params), [verts,], eps, gaussian_1d_pdf).to(device)
 
         # timer
         torch.cuda.synchronize()
         tbg = time.perf_counter_ns()
 
         # evaluate the sensitivity at x
-        with torch.inference_mode():
+        with torch.no_grad():
             out = grader(x, params)
 
         # timer
@@ -65,7 +64,7 @@ def run(params, bounds, eps, nvs, algs, res=8192):
 
     # get answer
     ans = solution(x, params)
-    pdfvals = gaussian_pdf_1d(x, params)
+    pdfvals = gaussian_1d_pdf(x, params)
 
     return x.cpu(), ans.cpu(), pdfvals.cpu(), outs
 

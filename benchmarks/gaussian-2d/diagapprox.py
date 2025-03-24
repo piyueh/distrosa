@@ -9,7 +9,7 @@ import time
 import itertools
 import torch
 import distrosa
-from distrosa.samplers.gaussian_2d import gaussian_pdf_2d
+from distrosa.utils.gaussian_2d_sampler import gaussian_2d_pdf
 
 
 # let the default floating precision to be 64bit
@@ -54,8 +54,7 @@ def run(params, bounds, eps, nvs, algs, res):
         verts = [torch.linspace(_[0], _[1], nv) for _ in bounds]
 
         # gradient/sensitivity calculator
-        grader = algcls[alg](len(params), verts, eps).to(device)
-        grader.register(gaussian_pdf_2d)
+        grader = algcls[alg](len(params), verts, eps, gaussian_2d_pdf).to(device)
 
         # timer
         torch.cuda.synchronize()
@@ -78,7 +77,7 @@ def run(params, bounds, eps, nvs, algs, res):
 
     # get answer
     ans = solution(x, params)
-    pdfvals = gaussian_pdf_2d(x, params)
+    pdfvals = gaussian_2d_pdf(x, params)
 
     return x.cpu(), ans.cpu(), pdfvals.cpu(), outs, times
 

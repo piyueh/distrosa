@@ -1,0 +1,15 @@
+font.size: 8
+axes.labelsize: small
+axes.titlesize: medium
+xtick.labelsize: small
+ytick.labelsize: small
+legend.fontsize: small
+legend.title_fontsize: small
+figure.dpi: 768
+figure.titlesize: medium
+figure.constrained_layout.use: True
+lines.linewidth: 1.0
+image.cmap: turbo
+savefig.dpi: 768
+savefig.format: png
+savefig.bbox: tight
