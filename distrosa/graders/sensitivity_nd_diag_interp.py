@@ -170,5 +170,7 @@ class SensitivityNDDiagInterp(SensitivityBase):
             Whether the internal data needs to be updated.
         """
 
+        eps = torch.finfo(self.eps.dtype).eps * 10
+
         # we may have other criteria in the future
-        return (not torch.allclose(params, self._params, 0.0, 1e-9, True))
+        return (not torch.allclose(params, self._params, 0.0, eps, True))
