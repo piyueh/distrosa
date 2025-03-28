@@ -65,7 +65,7 @@ def ploterrors(data, figdir):
     fdgrads2 = numpy.array([data["fd2"][_].numpy() for _ in ndraws])
     fderrs2 = abs((fdgrads2-ans)/ans)
 
-    fig = pyplot.figure(figsize=(5.0, 2.5))
+    fig = pyplot.figure(figsize=(5.0, 2.75))
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 10])
     axs = [fig.add_subplot(gs[1, 0]), fig.add_subplot(gs[1, 1])]
     lgax = fig.add_subplot(gs[0, :])
@@ -107,11 +107,27 @@ def ploterrors(data, figdir):
         axs[i].set_yscale("log")
         axs[i].set_ylabel(rf"Relative Error of $\partial L / \partial {parname[i]}$")
 
+        # plot 1st order reference
+        ox1, oy1 = axs[i].transAxes.transform((0.1, 0.1))  # axes -> display
+        ox1, oy1 = axs[i].transData.inverted().transform((ox1, oy1))  # display -> data
+        ox2, oy2 = axs[i].transAxes.transform((0.75, 0.1))  # axes -> display
+        ox2, oy2 = axs[i].transData.inverted().transform((ox2, oy2))  # display -> data
+        oy2 = (ox1 / ox2)**0.5 * oy1
+        axs[i].plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+        axs[i].text(
+            ox2/10**1.5, oy1/10**0.5, r"$\mathcal{O}(M_x^{-0.5})$", fontsize="x-small",
+            ha="right", va="top",
+            bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+        )
+
+        axs[i].grid(True, which="both", lw=0.1, zorder=-1)
+        axs[i].set_axisbelow(True)
+
     lgax.legend(
-        handles=bands,
+        handles=bands,  # type: ignore
         labels=[alglbls[_] for _ in errs.keys()]+
             [r"FD ($\Delta=10^{-3}$)", r"FD ($\Delta=10^{-5}$)"],
-        handler_map={_: HandlerMedianInterval() for _ in bands},
+        handler_map={_: HandlerMedianInterval() for _ in bands},  # type: ignore
         loc="center",
         ncol=4, columnspacing=0.6, borderaxespad=0.0,
     )

@@ -20,7 +20,7 @@ pyplot.rcParams.update({
     "figure.dpi": 768,
     "figure.titlesize": "medium",
     "figure.constrained_layout.use": True,
-    "lines.linewidth": 1.5,
+    "lines.linewidth": 1.0,
     "image.cmap": "turbo",
     "savefig.dpi": 768,
     "savefig.format": "png",
@@ -40,7 +40,7 @@ alglbls = {
 }
 
 
-def plot_sensitivity(x, ans, computed, figdir):
+def plot_sensitivity(x, ans, computed, params, figdir):
     """Plot the sensitivity results.
     """
 
@@ -63,6 +63,11 @@ def plot_sensitivity(x, ans, computed, figdir):
             # only plot the highest background resolution
             ax.plot(x, data[max(data.keys())][..., i], **pltprops)  # type: ignore
 
+        # plot lines to indicate the domain of interest
+        ax.axvline(params[0]-4*params[1], color="gray", ls="--", lw=0.5)
+        ax.axvline(params[0]+4*params[1], color="gray", ls="--", lw=0.5)
+
+        ax.set_xlim(params[0]-5*params[1], params[0]+5*params[1])
         ax.set_xlabel(r"$x$")
         ax.set_ylabel(rf"$\partial x \slash \partial \{names[i]}$")
         ax.legend(loc=0)
@@ -70,30 +75,36 @@ def plot_sensitivity(x, ans, computed, figdir):
         pyplot.close(fig)
 
 
-def plot_errors(x, ans, pdfvals, computed, figdir):
+def plot_errors(x, ans, pdfvals, computed, params, figdir):
     """Calculate and plot L1 errors.
     """
     # these were saved as torch.tensors; now convert to numpy
     x = x.numpy()
+    params = params.numpy()
     ans = ans.numpy()
     pdfvals = pdfvals.numpy()
+
+    # only integrate over the domain of interest
+    locs = numpy.where(numpy.logical_and(
+        x >= params[0]-4*params[1], x <= params[0]+4*params[1]
+    ))
 
     errs = [{}, {}]
     nvs = {}
     for alg, dset in computed.items():
         for res, data in dset.items():
             data = data.numpy()
-            out = numpy.abs(data - ans)
-            out = out * pdfvals.reshape(-1, 1)
-            out = numpy.trapezoid(out, x, axis=0)
+            out = numpy.abs(data - ans)[locs]
+            out = out * pdfvals[locs].reshape(-1, 1)
+            out = numpy.trapezoid(out, x[locs], axis=0)
             errs[0].setdefault(alg, []).append(out[0])
             errs[1].setdefault(alg, []).append(out[1])
             nvs.setdefault(alg, []).append(res)
 
     # tunes location for legends
     lgdcfg = [
-        dict(loc="lower left", bbox_to_anchor=(0.001, 0.001)),
-        dict(loc="center right", bbox_to_anchor=(0.999, 0.45))
+        dict(loc="center right", bbox_to_anchor=(0.999, 0.45)),
+        dict(loc="center right", bbox_to_anchor=(0.999, 0.43))
     ]
 
     # name for derivatives
@@ -155,7 +166,11 @@ if __name__ == "__main__":
 
     # read in data
     dset = torch.load(figdir.joinpath("results.dat"))
+    x = dset["x"]
+    ans = dset["ans"]
+    params = dset["params"]
+    computed = dset["computed"]
 
     # plot
-    plot_sensitivity(dset["x"], dset["ans"], dset["computed"], figdir)
-    plot_errors(dset["x"], dset["ans"], dset["pdfvals"], dset["computed"], figdir)
+    plot_sensitivity(x, ans, computed, params, figdir)
+    plot_errors(x, ans, dset["pdfvals"], computed, params, figdir)

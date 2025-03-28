@@ -239,7 +239,7 @@ def diagapprox(params):
     return ctf_kwargs, cbar_kwargs
 
 
-def plot_dist(x, vals, figdir):
+def plot_dist(x, vals, params, mask, figdir):
     """Plot the 2D Gaussian distribution.
     """
 
@@ -259,11 +259,13 @@ def plot_dist(x, vals, figdir):
         extend="neither"
     )
 
+    mvals = numpy.ma.array(vals, mask=~mask)
+
     # plot
     fig = pyplot.figure(figsize=(2.5, 3.0))
     gs = fig.add_gridspec(1, 1)
     ax = fig.add_subplot(gs[0, 0])
-    ax.contourf(x[..., 0], x[..., 1], vals, **ctfargs)
+    ax.contourf(x[..., 0], x[..., 1], mvals, **ctfargs)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$x_1$")
     ax.set_ylabel(r"$x_2$")
@@ -274,7 +276,7 @@ def plot_dist(x, vals, figdir):
     return
 
 
-def plot_sensitivity(x, ans, params, computed, figdir, variant):
+def plot_sensitivity(x, ans, params, computed, mask, figdir, variant):
     """Plot the sensitivities.
     """
 
@@ -288,13 +290,17 @@ def plot_sensitivity(x, ans, params, computed, figdir, variant):
         i, j = ij
         for alg, dset in computed.items():
             val = dset[-1]
+            mval = numpy.ma.array(
+                val,
+                mask=~mask.reshape(*mask.shape, 1, 1)*numpy.ones(val.shape, dtype=bool)
+            )
             res = val.shape[0]
             print(f"plotting {alg}-{res}x{res}-({i}, {j})")
 
             fig = pyplot.figure(figsize=(2.5, 3.0))
             gs = fig.add_gridspec(1, 1)
             ax = fig.add_subplot(gs[0, 0])
-            ax.contourf(x[..., 0], x[..., 1], val[..., i, j], **ctfargs[ij])
+            ax.contourf(x[..., 0], x[..., 1], mval[..., i, j], **ctfargs[ij])
             ax.set_aspect("equal", adjustable="box")
             ax.set_xlabel(r"$x_1$")
             ax.set_ylabel(r"$x_2$")
@@ -305,12 +311,16 @@ def plot_sensitivity(x, ans, params, computed, figdir, variant):
     # plot theoretical solutions
     for ij in itertools.product(range(2), range(5)):
         i, j = ij
+        mans = numpy.ma.array(
+            ans,
+            mask=~mask.reshape(*mask.shape, 1, 1)*numpy.ones(ans.shape, dtype=bool)
+        )
         print(f"plotting ans-({i}, {j})")
 
         fig = pyplot.figure(figsize=(2.5, 3.0))
         gs = fig.add_gridspec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
-        ax.contourf(x[..., 0], x[..., 1], ans[..., i, j], **ctfargs[ij])
+        ax.contourf(x[..., 0], x[..., 1], mans[..., i, j], **ctfargs[ij])
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel(r"$x_1$")
         ax.set_ylabel(r"$x_2$")
@@ -338,13 +348,14 @@ if __name__ == "__main__":
     pdfvals = dset["pdfvals"].numpy()
     params = dset["params"].numpy()
     outs = {alg: torch.stack(val).numpy() for alg, val in dset["outs"].items()}
+    mask = dset["mask"].numpy()
     del dset
 
     print("plotting pdf")
-    plot_dist(x, pdfvals, figdir)
+    plot_dist(x, pdfvals, params, mask, figdir)
 
     print("plotting fullmtx results")
-    plot_sensitivity(x, ans, params, outs, figdir, "fullmtxcfg")
+    plot_sensitivity(x, ans, params, outs, mask, figdir, "fullmtxcfg")
 
     print("loading diagapprox results")
     dset = torch.load(figdir.joinpath("diagapprox.dat"))
@@ -353,7 +364,8 @@ if __name__ == "__main__":
     pdfvals = dset["pdfvals"].numpy()
     params = dset["params"].numpy()
     outs = {alg: torch.stack(val).numpy() for alg, val in dset["outs"].items()}
+    mask = dset["mask"].numpy()
     del dset
 
     print("plotting diagapprox results")
-    plot_sensitivity(x, ans, params, outs, figdir, "diagapprox")
+    plot_sensitivity(x, ans, params, outs, mask, figdir, "diagapprox")

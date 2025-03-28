@@ -7,6 +7,8 @@ $ python main.py
 ```
 
 This command will create the `figs` directory and save the result data in it.
+The computation time should be less than 5 seconds when using a NVIDIA GeForce RTX 
+4070 GPU.
 
 ## Plot
 

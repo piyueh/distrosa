@@ -11,7 +11,7 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as mcm
 
 
-def plot_errors(x, errors, figdir):
+def plot_errors(x, errors, mask, figdir):
     """Plot the sensitivities.
     """
 
@@ -25,6 +25,7 @@ def plot_errors(x, errors, figdir):
 
         # to avoid log(0)
         err = numpy.where(err < 1e-15, 1e-15, err)
+        merr = numpy.ma.array(err, mask=~mask)
 
         # 5% and 95% quantile
         q05 = numpy.quantile(err, 0.05)
@@ -51,7 +52,7 @@ def plot_errors(x, errors, figdir):
         fig = pyplot.figure(figsize=(2.5, 3.0))
         gs = fig.add_gridspec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
-        cf = ax.contourf(x[..., 0], x[..., 1], err, **ctfargs)
+        cf = ax.contourf(x[..., 0], x[..., 1], merr, **ctfargs)
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel(r"$x_1$")
         ax.set_ylabel(r"$x_2$")
@@ -77,16 +78,18 @@ if __name__ == "__main__":
     dset = torch.load(figdir.joinpath("fullmtx.dat"))
     x = dset["x"].numpy()
     errs = {alg: torch.stack(val).numpy() for alg, val in dset["errs"].items()}
+    mask = dset["mask"].numpy()
     del dset
 
     print("plotting fullmtx errors")
-    plot_errors(x, errs, figdir)
+    plot_errors(x, errs, mask, figdir)
 
     print("loading diagapprox results")
     dset = torch.load(figdir.joinpath("diagapprox.dat"))
     x = dset["x"].numpy()
     errs = {alg: torch.stack(val).numpy() for alg, val in dset["errs"].items()}
+    mask = dset["mask"].numpy()
     del dset
 
     print("plotting diagapprox errors")
-    plot_errors(x, errs, figdir)
+    plot_errors(x, errs, mask, figdir)

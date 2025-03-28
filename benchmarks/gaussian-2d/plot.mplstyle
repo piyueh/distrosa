@@ -8,7 +8,7 @@ legend.title_fontsize: small
 figure.dpi: 768
 figure.titlesize: medium
 figure.constrained_layout.use: True
-lines.linewidth: 1.5
+lines.linewidth: 1.0
 image.cmap: turbo
 savefig.dpi: 768
 savefig.format: png

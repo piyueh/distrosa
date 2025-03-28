@@ -82,7 +82,7 @@ def run(params, bounds, eps, nvs, algs, res):
     return x.cpu(), ans.cpu(), pdfvals.cpu(), outs, times
 
 
-def get_errors(x, ans, pdfvals, computed):
+def get_errors(x, ans, pdfvals, mask, computed):
     """Calculate the errors.
     """
 
@@ -97,6 +97,7 @@ def get_errors(x, ans, pdfvals, computed):
             errs.setdefault(alg, []).append(err)
 
             err = err * pdfvals.view(*pdfvals.shape, 1, 1)  # -> (res, res, 2, 5)
+            err = err * mask.view(*mask.shape, 1, 1).to(pdfvals.dtype)
             err = torch.trapezoid(err, x[..., 0].view(*x.shape[:2], 1, 1), dim=0)
             err = torch.trapezoid(err, x[0, :, 1].view(-1, 1, 1), dim=0)
 
@@ -128,6 +129,21 @@ def solution(x, params):
     out[..., 1, 4] = sigma_2 * (z1 - rho * z2) / (1.0 - rho * rho)
 
     return out
+
+
+def mahalanobis(x, params):
+    """Calculate if x is within the 99.9999% interval.
+    """
+    assert x.shape[-1] == 2
+    c = 19.333908611934685
+    mu = params[:2]
+    sigma = torch.tensor([
+        [params[2]**2, params[4]*params[2]*params[3]],
+        [params[4]*params[2]*params[3], params[3]**2]
+    ], device=params.device)
+    x = x - mu
+    x = torch.einsum("...i,ij,...j->...", x, torch.linalg.inv(sigma), x)
+    return x < c
 
 
 if __name__ == "__main__":
@@ -164,12 +180,18 @@ if __name__ == "__main__":
     # get results
     x, ans, pdfvals, outs, times = run(params, bounds, eps, nvs, algs, res)
 
+    # form now on everything is on CPU
+    params = params.detach().cpu()
+
+    # get mask for confidience equivalent to +- 4 sigmas, domain of interest
+    mask = mahalanobis(x, params)
+
     # get errors
-    errs, convs = get_errors(x, ans, pdfvals, outs)
+    errs, convs = get_errors(x, ans, pdfvals, mask, outs)
 
     # save to a file
     torch.save({
         "x": x, "ans": ans, "pdfvals": pdfvals, "nvs": nvs, "params": params.cpu(),
         "algs": algs, "bounds": bounds.cpu(), "outs": outs, "times": times,
-        "errs": errs, "convs": convs
+        "errs": errs, "convs": convs, "mask": mask.cpu()
     }, figdir.joinpath("diagapprox.dat"))
