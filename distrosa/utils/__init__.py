@@ -7,8 +7,11 @@ Things here do not affect the sensitivity calculators in DistroSA at all. They a
 included in DistroSA because many use cases of DistroSA also need these things.
 """
 
-from .energy_score import AnalyticalEnergyScore, EmpiricalEnergyScore
+from .energy_score import AnalyticalEnergyScore
+from .energy_score import BlockAnalyticalEnergyScore
+from .energy_score import EmpiricalEnergyScore
 from .rejection_sampler import RejectionSampler
+from .rejection_sampler import PiecewiseConstantProposal
 from .gaussian_1d_sampler import Gaussian1DSampler
 from .gaussian_2d_sampler import Gaussian2DSampler
 from .beta_1d_sampler import Beta1DSampler
