@@ -75,6 +75,8 @@ def interp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor) -> Tensor:
         Interpolated values at `x`. The same shape as `x`.
     """
 
+    x = x.contiguous()  # do nothing if already contiguous
+
     # identify the upper bound vertex's index for the piece that contains each point
     idx = torch.searchsorted(verts, x, side="right")
 
@@ -116,6 +118,7 @@ def minterp(x: Tensor, verts: Tensor, h: Tensor, values: Tensor):
     # easier to work with flattened arrays
     xshape = x.shape
     x = x.view(-1)  # shape (nx,)
+    x = x.contiguous()  # do nothing if already contiguous
     values = values.view(-1, len(verts))  # shape (nx, nv)
     ix = torch.arange(x.numel())  # shape (nx,)
 
@@ -171,16 +174,18 @@ def interpnd(x: Tensor, verts: Sequence[Tensor]|torch.nn.ParameterList, values: 
 
     for i in range(N):  # loop over each dimension
 
+        xi = x[..., i].contiguous()  # non-copy if already contiguous
+
         # aliases for readability
         vi = verts[i]
 
         # identify the hypercube's index in each dimension the points belong to
-        tmp = torch.searchsorted(vi, x[..., i], side="right") - 1
+        tmp = torch.searchsorted(vi, xi, side="right") - 1
         ids[i, ...] = torch.clip(tmp, 0, K[i]-2)
         tmp = None
 
         # calculate the local coordinates for points in their hypercubes
-        tmp = (x[..., i] - vi[ids[i, ...]]) / (vi[ids[i, ...]+1] - vi[ids[i, ...]])
+        tmp = (xi - vi[ids[i, ...]]) / (vi[ids[i, ...]+1] - vi[ids[i, ...]])
         local[..., i] = tmp * 2.0 - 1.0  # shift to [-1, 1]
         tmp = None
 
