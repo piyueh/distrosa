@@ -31,7 +31,7 @@ alglbls = {
 }
 
 # names of the parameters
-parname = [r"\theta_1", r"\theta_2", r"\theta_3", r"\theta_4", r"\theta_5"]
+parname = [r"\alpha_1", r"\alpha_2", r"\alpha_3", r"\alpha_4", r"\alpha_5"]
 
 
 class HandlerMedianInterval(HandlerPolyCollection):
@@ -179,6 +179,33 @@ def plot_grad_errors(data, figdir):
         fig.savefig(figdir/f"grad_err_{i}")
 
 
+def integrate(verts, func):
+    """Get the normalization factor.
+    """
+
+    vals = torch.zeros((verts[0].shape[0]-1, verts[1].shape[0]-1), dtype=verts[0].dtype)
+    vals = vals.to(verts[0].device)
+    for i in range(verts[0].shape[0]-1):
+        for j in range(verts[1].shape[0]-1):
+            q, w = numpy.polynomial.legendre.leggauss(5)
+            q = torch.tensor(q, dtype=verts[0].dtype, device=verts[0].device)
+            w = torch.tensor(w, dtype=verts[0].dtype, device=verts[0].device)
+            qs = [
+                (q + 1.0) / 2.0 * (verts[0][i+1] - verts[0][i]) + verts[0][i],
+                (q + 1.0) / 2.0 * (verts[1][j+1] - verts[1][j]) + verts[1][j],
+            ]
+            ws = [
+                w / 2.0 * (verts[0][i+1] - verts[0][i]),
+                w / 2.0 * (verts[1][j+1] - verts[1][j]),
+            ]
+            qs = torch.stack(torch.meshgrid(*qs, indexing="ij"), -1).view(-1, 2)
+            ws = torch.stack(torch.meshgrid(*ws, indexing="ij"), -1).view(-1, 2)
+            ws = torch.prod(ws, -1)
+            vals[i, j] = torch.sum(func(qs)*ws)
+    norm = vals.sum()
+    return norm
+
+
 def examine(curpars, ndraw, fname):
     """Examine
     """
@@ -194,26 +221,8 @@ def examine(curpars, ndraw, fname):
     sampler = distrosa.utils.RejectionSampler(proxy_2d, verts, None)
     samples = sampler(ndraw, curpars)
 
-    # to calculate normalization factor
-    vals = torch.zeros((verts[0].shape[0]-1, verts[1].shape[0]-1), dtype=curpars.dtype)
-    for i in range(verts[0].shape[0]-1):
-        for j in range(verts[1].shape[0]-1):
-            q, w = numpy.polynomial.legendre.leggauss(5)
-            q = torch.tensor(q, dtype=curpars.dtype)
-            w = torch.tensor(w, dtype=curpars.dtype)
-            qs = [
-                (q + 1.0) / 2.0 * (verts[0][i+1] - verts[0][i]) + verts[0][i],
-                (q + 1.0) / 2.0 * (verts[1][j+1] - verts[1][j]) + verts[1][j],
-            ]
-            ws = [
-                w / 2.0 * (verts[0][i+1] - verts[0][i]),
-                w / 2.0 * (verts[1][j+1] - verts[1][j]),
-            ]
-            qs = torch.stack(torch.meshgrid(*qs, indexing="ij"), -1).view(-1, 2)
-            ws = torch.stack(torch.meshgrid(*ws, indexing="ij"), -1).view(-1, 2)
-            ws = torch.prod(ws, -1)
-            vals[i, j] = torch.sum(proxy_2d(qs, curpars)*ws)
-    norm = vals.sum()
+    # calculate normalization factor
+    norm = integrate(verts, lambda x: proxy_2d(x, curpars))
 
     # get normalized PDF at vertices
     vals = proxy_2d(torch.stack(torch.meshgrid(verts, indexing="ij"), -1), curpars)
@@ -232,10 +241,6 @@ def examine(curpars, ndraw, fname):
     hist = numpy.histogram2d(samples[:, 0], samples[:, 1], hverts, density=True)[0]
     hist = hist / hist.sum()
     hist = hist / (((1. - 1e-6 - 1e-6) / (33 - 1))**2)
-
-    valmax = sampler.proposal.valmax.detach().cpu().numpy()  # type: ignore
-    w = sampler.proposal.weights.detach().cpu().numpy()  # type: ignore
-    xmax = sampler.proposal.xmax.detach().cpu().numpy()  # type: ignore
 
     # to unify the colorbar
     vmin = numpy.quantile(vals, 0.01).item()
@@ -276,10 +281,10 @@ def plot_train_results(params, ans, figdir):
     """Plot training results.
     """
 
-    parnames = [rf"$\theta_{i}$" for i in range(1, 6)]
+    parnames = [rf"$\alpha_{i}$" for i in range(1, 6)]
     params = {k: v / ans for k, v in params.items()}
     algs = ["alg-3", "alg-4", "alg-6", "alg-7", "analytical"]
-    labels = ["Full Inv", "Diag Approx", "Interp Full", "Interp Diag", "Analytical"]
+    labels = ["Full Inv", "Diag Approx", "Interp Full", "Interp Diag", "Continuous"]
 
     # plot loss
     fig, axs = pyplot.subplots(1, 5, figsize=(7.5, 3.0), squeeze=False)
@@ -354,6 +359,79 @@ def read_trained_data(figdir):
     return lossout, paramout, timeout, itersout
 
 
+def get_pdf_errors(trainedpars, anspars, fname):
+    """Get PDF errors
+    """
+
+    if fname.is_file():
+        errs = torch.load(fname)
+        return errs
+
+    algs =  ["alg-3", "alg-4", "alg-6", "alg-7", "analytical"]
+    verts = [torch.linspace(1e-6, 1.-1e-6, 51) for _ in range(2)]
+    verts = [_.to("cpu") for _ in verts]
+    anspars = torch.as_tensor(anspars).to("cpu")
+    ansnorm = integrate(verts, lambda x: proxy_2d(x, anspars))
+
+    errs = {}
+    for alg in algs:
+
+        if alg not in errs:
+            errs[alg] = torch.zeros(trainedpars[alg].shape[0], dtype=torch.float64)
+            errs[alg] = errs[alg].to("cpu")
+
+        for i, pars in enumerate(trainedpars[alg]):
+            pars = torch.tensor(pars).to("cpu")
+            norm = integrate(verts, lambda _x: proxy_2d(_x, pars))
+
+            def kernel(_x):
+                _anspdf = proxy_2d(_x, anspars) / ansnorm
+                _trainedpdf = proxy_2d(_x, pars) / norm
+                _err = torch.abs(_trainedpdf-_anspdf)  # absolute
+                _err = torch.where(_anspdf == 0, _err, _err/_anspdf)  # relative
+                return _err
+
+            with torch.no_grad():
+                errs[alg][i] = integrate(verts, kernel).detach().cpu()
+
+            print(alg, i, errs[alg][i])
+
+    torch.save(errs, fname)
+    return errs
+
+
+def plot_pdf_errors(errs, figdir):
+    """Plot PDF errors.
+    """
+
+    algs =  ["alg-3", "alg-4", "alg-6", "alg-7", "analytical"]
+    labels = ["Full Inv", "Diag Approx", "Interp Full", "Interp Diag", "Continuous"]
+
+    fig, axs = pyplot.subplots(1, 1, figsize=(2.5, 2.5), squeeze=False)
+
+    axs[0, 0].boxplot(
+        errs.values(),
+        vert=True, widths=0.6,
+        showmeans=False,
+        capprops={"color": "tab:blue"},
+        boxprops={"color": "tab:blue"},
+        whiskerprops={"color": "tab:blue"},
+        flierprops=dict(marker="o", mec="tab:blue", alpha=0.3, ms=3),
+        medianprops={"lw": 1.5, "color": "tab:blue"},
+        meanprops={"ms": 4, "mfc": "tab:blue", "mec": "tab:blue"},
+        tick_labels=labels,
+    )
+    axs[0, 0].tick_params(axis="x", labelsize=8, rotation=90)
+    axs[0, 0].tick_params(axis="y", labelsize=8, rotation=-60)
+    axs[0, 0].yaxis.set_major_formatter(mticker.ScalarFormatter(False))
+    axs[0, 0].set_ylim(0.0, 0.6)
+
+    fig.supxlabel("DistroSA Algorithms")
+    fig.supylabel(r"$L_1$ Error of PDF")
+    fig.set_facecolor("whitesmoke")
+    fig.savefig(figdir/"pdf_errs")
+
+
 if __name__ == "__main__":
     import pathlib
     import pickle
@@ -373,7 +451,11 @@ if __name__ == "__main__":
     plot_grad_errors(_out, _figdir)
 
     _losses, _params, _times, _iters = read_trained_data(_figdir)
-    pprint.pprint({k: numpy.median(v).item() for k, v in _times.items()})
-    pprint.pprint({k: numpy.median(v).item() for k, v in _iters.items()})
+
+    pprint.pprint({k: numpy.mean(v).item() for k, v in _times.items()})
+    pprint.pprint({k: numpy.mean(v).item() for k, v in _iters.items()})
     plot_train_results(_params, _out["anspars"].numpy(), _figdir)
     examine(numpy.median(_params["alg-6"], axis=0), 10000, _figdir/"trained_hist")
+
+    _errs_10k = get_pdf_errors(_params, _out["anspars"], _figdir/"pdferrs.dat")
+    plot_pdf_errors(_errs_10k, _figdir)

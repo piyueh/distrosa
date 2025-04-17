@@ -16,16 +16,16 @@ The parameters have upper and lower bounds:
 
 The ground truth parameters are: ans = [0.5, 3.0, 0.3, 4.0, 0.75].
 """
+import re
 import pathlib
 import math
 import time
 import itertools
 import pickle
-from typing import Sequence
+import multiprocessing as mp
 import numpy
 import torch
 from torch import Tensor
-from torch import multiprocessing as mp
 import distrosa
 import distrosa.utils
 from density import proxy_2d
@@ -35,9 +35,13 @@ figdir = pathlib.Path(__file__).parent.joinpath("figs")
 figdir.mkdir(exist_ok=True)
 
 torch.set_default_dtype(torch.float64)
-torch.set_printoptions(precision=15)
+torch.set_printoptions(precision=5)
 numpy.set_printoptions(precision=5, formatter={"float": "{:.5e}".format})
 torch.cpu.manual_seed = torch.manual_seed  # type: ignore
+
+# no need for any built-in multithreading, which interfere with multiprocessing
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
 
 # mapping between algorithm keys and implementations
 algcls = {
@@ -48,31 +52,26 @@ algcls = {
 }
 
 
-def gentrain(ndraw: int, tol: float, params: Tensor) -> Tensor:
+def gentrain(ndraw: int, xbounds: Tensor, params: Tensor) -> Tensor:
     """Generate training dataset.
+
+    Always on CPU.
     """
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    params = params.to(device)
+    xbounds = xbounds.to("cpu")
+    params = params.to("cpu")
 
     # backup the current random state and manually set the seed
-    if device.type == "cuda":
-        state = torch.cuda.get_rng_state(device)
-        torch.cuda.manual_seed(100)
-    else:
-        state = torch.get_rng_state()
-        torch.manual_seed(100)
+    state = torch.get_rng_state()
+    torch.manual_seed(100)
 
     with torch.no_grad():
-        verts = [torch.linspace(tol, 1.-tol, 11).to(device) for _ in range(2)]
-        sampler = distrosa.utils.RejectionSampler(proxy_2d, verts, None).to(device)
+        verts = [torch.linspace(_[0], _[1], 11, device="cpu") for _ in xbounds]
+        sampler = distrosa.utils.RejectionSampler(proxy_2d, verts, None)
         samples = sampler(ndraw, params)
 
     # restore the random state
-    if device.type == "cuda":
-        torch.cuda.set_rng_state(state, device)
-    else:
-        torch.set_rng_state(state)
+    torch.set_rng_state(state)
 
     return samples.detach()
 
@@ -116,74 +115,130 @@ def get_analytical_grads(params: Tensor, bounds: Tensor, traindset: Tensor):
     return {"loss": loss.detach().cpu(), "grad": grad}
 
 
-def get_numerical_grads(_tdset, _pars, _xbds, _nv, _eps, _nreps, _ndraws, _alg, _dvce):
+def gradworker(inqueue, device, curpars, trainset, xbds, nv, eps):
+    """Worker of evaluating gradients.
+    """
 
-    # for reproducibility
-    if _dvce.type == "cuda":
-        state = torch.cuda.get_rng_state(_dvce)
-        torch.cuda.manual_seed(8888)
-    else:
-        state = torch.get_rng_state()
-        torch.manual_seed(8888)
+    proc = mp.current_process()
+    print(f"[{proc.name}] Started. Device: {device}")
 
-    _grads = {}
-    _losses = {}
+    if torch.device(device).type == "cuda":
+        torch.cuda.set_device(device)
 
-    # move training data to the device
-    _tdset = _tdset.to(_dvce)
+    # they are supposed to be on CPU before
+    xbds = xbds.clone().to(device)
+    trainset = trainset.clone().to(device)
+    curpars = curpars.detach().clone().to(device).requires_grad_(True)
 
-    # the "current" parameters; `device` must be inside to make it a leaf tensor
-    _pars = _pars.detach().clone().to(_dvce).requires_grad_(True)
+    # sensitivity calculator for all algorithms
+    vert1 = [torch.logspace(math.log10(_[0]), math.log10(_[1]), nv) for _ in xbds]
+    graders = {
+        alg: algcls[alg](len(curpars), vert1, eps, proxy_2d).to(device)
+        for alg in ["alg-3", "alg-4", "alg-6", "alg-7"]
+    }
 
-    # sensitivity calculator
-    _gd1 = [torch.logspace(math.log10(_[0]), math.log10(_[1]), _nv) for _ in _xbds]
-    _grader = algcls[_alg](len(_pars), _gd1, _eps, proxy_2d).to(_dvce)
-
-    # grid for piecewise constant rejection sampler
-    _gd2 = [torch.linspace(_[0], _[1], 11) for _ in _xbds]
-    _sampler = distrosa.utils.RejectionSampler(proxy_2d, _gd2, _grader).to(_dvce)
+    # samplers for all algorithms
+    vert2 = [torch.linspace(_[0], _[1], 11) for _ in xbds]
+    samplers = {
+        alg: distrosa.utils.RejectionSampler(proxy_2d, vert2, graders[alg]).to(device)
+        for alg in ["alg-3", "alg-4", "alg-6", "alg-7"]
+    }
 
     # loss function and optimizer
-    _lossfn = distrosa.utils.EmpiricalEnergyScore().to(_dvce)
+    lossfn = distrosa.utils.EmpiricalEnergyScore().to(device)
 
-    for _ndr, _irep in itertools.product(_ndraws, range(_nreps)):
+    while True:
+        try:
+            case = inqueue.get(True, 5)
+            if case is None:
+                inqueue.task_done()
+                break
+        except mp.queues.Empty:  # type: ignore
+            break
 
-        if _ndr not in _grads:
-            _grads[_ndr] = torch.zeros((_nreps, _pars.numel()))
-            _losses[_ndr] = torch.full((_nreps,), numpy.nan)
+        alg, ndraw, irep = case  # extract info
+
+        # reset the random number generator using ndraw and irep
+        getattr(torch, curpars.device.type).manual_seed(ndraw+irep)
 
         # clear the gradient
-        _pars.grad = None
+        curpars.grad = None
 
         # generate predicitons via differentiable Beta sampler
-        _preds = _sampler(_ndr, _pars)
+        preds = samplers[alg](ndraw, curpars)
 
         # calculate the loss
-        _loss = _lossfn(_preds, _tdset)
+        loss = lossfn(preds, trainset)
 
         # backpropagate
-        _loss.backward()
+        loss.backward()
 
         # we only store detached CPU tensors
-        _grad = _pars.grad.detach().cpu()  # type: ignore
-        _grads[_ndr][_irep, :] = _grad
-        _losses[_ndr][_irep] = _loss.item()
+        grad = curpars.grad.detach().cpu()  # type: ignore
+        loss = loss.item()
 
-        print(f"[{_alg}, {_nv}^2, {_ndr}, {_irep}] {_loss.item()}; {_grad.numpy()}")
+        print(f"[{proc.name}] {(alg, ndraw, irep)}, {loss}, {grad.numpy()}")
 
-        # release mem
-        _loss = None; _preds = None;
+        # save
+        with open(figdir/f"grad-{alg}-{ndraw}-{irep:03d}.dat", "wb") as f:
+            pickle.dump(dict(alg=alg, ndraw=ndraw, irep=irep, loss=loss, grad=grad), f)
 
-    # save data
-    torch.save({"loss": _losses, "grad": _grads}, figdir/f"{_alg}.dat")
+        del alg, ndraw, irep, case, loss, grad
 
-    # restore the random state
-    if _dvce.type == "cuda":
-        torch.cuda.set_rng_state(state, _dvce)
-    else:
-        torch.set_rng_state(state)
+        inqueue.task_done()
 
-    return None  # end
+    print(f"[{proc.name}] Ended.")
+    return None
+
+
+def get_numerical_grads(tdset, pars, xbds, nv, eps, nreps, ndraws, algs: list[str]):
+    """Get numerical gradients using DistroSA.
+    """
+
+    # working on CPUs first
+    tdset = tdset.cpu()
+    pars = pars.cpu()
+    xbds = xbds.cpu()
+
+    # identifiers for all bootstraps and repetitions
+    cases = set(itertools.product(algs, ndraws, range(nreps)))
+
+    # remove what are already done from all identifiers
+    files = list(_.name for _ in figdir.glob(f"grad-*.dat"))
+    for f in files:
+        res = re.search(r"grad-(.*)-(\d+?)-(\d+?).dat", f).groups()  # type: ignore
+        cases.remove((res[0], int(res[1]), int(res[2])))
+
+    # determine the way to parallelize the computation
+    if torch.cuda.is_available():
+        worldsize = torch.cuda.device_count()
+        devices = [f"cuda:{_}" for _ in range(worldsize)]
+    else:  # cpu
+        worldsize = mp.cpu_count() // 2  # in case of hyperthreading
+        devices = ["cpu" for _ in range(worldsize)]
+
+    # prepare a shared queue to hold all cases
+    inpq = mp.JoinableQueue()
+    for case in cases:
+        inpq.put(case)
+
+    for rank in range(worldsize):
+        inpq.put(None)
+
+    # put them together for a shorter code later
+    workerargs = (pars, tdset, xbds, nv, eps)
+
+    # start workers
+    procs = []
+    for rank in range(worldsize):
+        p = mp.Process(target=gradworker, args=(inpq, devices[rank])+workerargs)
+        p.start()
+        procs.append(p)
+
+    # wait until the queue is empty
+    inpq.join()
+
+    return None
 
 
 def trainer_analytical(traindset, pbounds, xbounds, maxiters, *args, **kwargs):
@@ -326,90 +381,148 @@ def trainer_empirical(traindset, pbounds, xbounds, maxiters, nverts, eps, alg):
     return out
 
 
-def bootstrapping(nbts, nreps, tdset, pbds, xbds, nv, eps, alg, device):
-    """Bootstrapping analysis.
+def btworker(inqueue, device, pbds, xbds, nv, eps, trainset, btids):
+    """A worker for bootstrapping analysis.
     """
 
-    print(f"starting {alg}")
+    proc = mp.current_process()
+    print(f"[{proc.name}] Started. Device: {device}")
 
-    trainer = trainer_analytical if alg == "analytical" else trainer_empirical
+    if torch.device(device).type == "cuda":
+        torch.cuda.set_device(device)
 
-    # move inputs to the device
-    tdset = tdset.to(device)
-    pbds = pbds.to(device)
-    xbds = xbds.to(device)
+    # they are supposed to be on CPU before
+    pbds = pbds.clone().to(device)
+    xbds = xbds.clone().to(device)
+    trainset = {k: v.clone().to(device) for k, v in trainset.items()}
+    btids = {k: v.clone().to(device) for k, v in btids.items()}
 
-    # weights of bootstrapping data using multinomial distribution
-    wts = torch.ones(tdset.shape[0], dtype=tdset.dtype).to(device)
+    while True:
+        try:
+            case = inqueue.get(True, 5)
+            if case is None:
+                inqueue.task_done()
+                break
+        except mp.queues.Empty:  # type: ignore
+            break
 
-    # all bootstraps and repetitions
-    cases = set(itertools.product(range(nbts), range(nreps)))
+        alg, ntrain, ibt, irep = case  # extract info
+        trainer = trainer_analytical if alg == "analytical" else trainer_empirical
+        dset = trainset[ntrain][btids[ntrain][ibt]].clone()
+        getattr(torch, dset.device.type).manual_seed(ibt*1000+irep)
+        result = trainer(dset, pbds, xbds, 25, nv, eps, alg)
+        result.update({"ibt": ibt, "irep": irep, "alg": alg})
 
-    # gether what are already done
-    if figdir.joinpath(f"train-{alg}.dat").exists():
-        with open(figdir/f"train-{alg}.dat", "rb") as f:
-            while True:
-                try:
-                    _result = pickle.load(f)
-                    cases.remove((_result["ibt"], _result["irep"]))
-                except EOFError:
-                    break
-    else:
-        figdir.joinpath(f"train-{alg}.dat").touch()
-
-    print(f"{alg} remaining cases: {len(cases)}")
-
-    # turn into soreted list
-    cases = sorted(cases, key=lambda x: x[0])
-
-    # loop over bootstraps
-    for ibt, irep in cases:
-
-        if ibt == 0:
-            _ids = torch.arange(tdset.shape[0])
-        else:
-            getattr(torch, device.type).manual_seed(ibt)
-            _ids = torch.multinomial(wts, tdset.shape[0], replacement=True)
-
-        # cases with the same ibt share the same training dataset
-        _dset = tdset[_ids]
-
-        # unique seed for each ibt-irep conbination
-        getattr(torch, device.type).manual_seed(ibt*1000+irep)
-        _result = trainer(_dset, pbds, xbds, 25, nv, eps, alg)
-
-        # add extra information
-        _result.update({"ibt": ibt, "irep": irep, "alg": alg})
+        print(
+            f"[{proc.name}] " +
+            f"{(alg, ntrain, ibt, irep)}, {result["loss"]}, {result["pars"].numpy()}"
+        )
 
         # save
-        with open(figdir/f"train-{alg}.dat", "ab") as f:
-            pickle.dump(_result, f)
+        with open(figdir/f"train-{alg}-{ntrain}-{ibt:03d}-{irep:02d}.dat", "wb") as f:
+            pickle.dump(result, f)
 
-        msg = f"{alg};"
-        msg += f"{ibt+1}/{nbts};{irep+1}/{nreps};"
-        msg += f"loss:{_result['loss'].item():.5e};"
-        msg += f"time:{_result['time']:.3e}s;"
-        msg += f"iters:{_result['iters']};"
-        msg += f"pars:{_result['pars'].numpy()}"
-        print(msg)
+        del alg, ntrain, ibt, irep, case, dset, trainer, result
 
-    return None  # end
+        inqueue.task_done()
+
+    print(f"[{proc.name}] Ended.")
+    return None
+
+
+def bootstrapper(algs: list[str], ntrains, nbts, nreps, pbds, xbds, nv, anspars, eps):
+    """Bootstrapping analysis.
+
+    Arguments
+    ---------
+    algs : list[str]
+    ntrains : int
+    nbts : int
+    nreps : int
+    pbds : P by 2 tensor
+    xbds : N by 2 tensor
+    nv : int
+    eps : float
+    """
+
+    # working on CPUs first
+    xbds = xbds.cpu()
+    pbds = pbds.cpu()
+    anspars = anspars.cpu()
+
+    # get training data and IDs for bootstrapped training data
+    trainset = {}  # training dataset
+    btids = {}  # bootstrap indices
+    for ntrain in ntrains:
+        trainset[ntrain] = gentrain(ntrain, xbds, _anspars)
+        torch.manual_seed(ntrain)
+        wts = torch.ones(ntrain, dtype=anspars.dtype)
+        btids[ntrain] = torch.zeros((nbts, ntrain), dtype=torch.int64,)
+        btids[ntrain][0, ...] = torch.arange(ntrain)
+        for ibt in range(1, nbts):
+            btids[ntrain][ibt, ...] = torch.multinomial(wts, ntrain, replacement=True)
+
+    # identifiers for all bootstraps and repetitions
+    cases = set(itertools.product(algs, ntrains, range(nbts), range(nreps)))
+
+    # remove what are already done from all identifiers
+    files = list(_.name for _ in figdir.glob(f"train-*.dat"))
+    for f in files:
+        res = re.search(r"train-(.*)-(\d+?)-(\d+?)-(\d+?).dat", f)
+        res = res.groups()  # type: ignore
+        alg, ntrain, ibt, irep = res[0], int(res[1]), int(res[2]), int(res[3])
+        cases.remove((alg, ntrain, ibt, irep))
+
+    # determine the way to parallelize the computation
+    if torch.cuda.is_available():
+        worldsize = torch.cuda.device_count()
+        devices = [f"cuda:{_}" for _ in range(worldsize)]
+    else:  # cpu
+        worldsize = mp.cpu_count() // 2  # in case of hyperthreading
+        devices = ["cpu" for _ in range(worldsize)]
+
+    # prepare a shared queue to hold all cases
+    inpq = mp.JoinableQueue()
+    for case in cases:
+        inpq.put(case)
+
+    for rank in range(worldsize):
+        inpq.put(None)
+
+    # put them together for a shorter code later
+    workerargs = (pbds, xbds, nv, eps, trainset, btids)
+
+    # start workers
+    procs = []
+    for rank in range(worldsize):
+        p = mp.Process(target=btworker, args=(inpq, devices[rank])+workerargs)
+        p.start()
+        procs.append(p)
+
+    # wait until the queue is empty
+    inpq.join()
+
+    return None
 
 
 if __name__ == "__main__":
+
+    # CUDA backend can not use `fork` (this line must be inside the main block)
+    mp.set_start_method("forkserver")
 
     # configurations
     _tol = 1e-6  # tol <= x <= 1-tol
     _eps = 1e-6  # finite difference step
     _nbts1 = 200  # number of bootstraps to get stats for error convergence
-    _nbts2 = 30  # number of bootstraps to get stats for training performance
+    _nbts2 = 100  # number of bootstraps to get stats for training performance
     _nreps = 10  # 10  # number of repetitions to get stats
     _ndraws = [128, 512, 2048, 8192, 32768, 131072]
     _ntrain1 = 10000  # number of data points in the training dataset
-    _ntrain2 = 10000  # number of data points in the training dataset
+    _ntrain2 = [10000, 50000]  # numbers of data points in the training dataset
     _res1 = 1024  # resolution of the background grid
     _res2 = 64  # resolution of the background grid
-    _algs = ["alg-7", "alg-4", "alg-6", "alg-3"]
+    _algs1 = ["alg-7", "alg-4", "alg-6", "alg-3"]
+    _algs2 = ["alg-7", "alg-4", "alg-6", "alg-3", "analytical"]
     _curpars = torch.tensor([0.25, 3.375, 0.65, 3.75, 0.1])
 
     # ground truth parameters and bounds
@@ -421,43 +534,24 @@ if __name__ == "__main__":
     # bounds
     _xbds = torch.tensor([[_tol, 1-_tol], [_tol, 1-_tol]])
 
-    # get training dataset
-    _train1 = gentrain(_ntrain1, _tol, _anspars)
-    _train2 = gentrain(_ntrain2, _tol, _anspars)
+    # get training dataset for gradient calculation
+    _train1 = gentrain(_ntrain1, _xbds, _anspars)
 
     # get analytical gradients
     _truegrads = get_analytical_grads(_curpars, _xbds, _train1)
 
-    # determine the way to parallelize the computation
-    if torch.cuda.is_available():
-        mp.set_start_method("spawn")  # CUDA needs to use spawn
-        worldsize = torch.cuda.device_count()
-        devices = [torch.device(f"cuda:{_}") for _ in range(worldsize)]
-    else:  # cpu
-        worldsize = mp.cpu_count() // 2  # in case of hyperthreading
-        devices = [torch.device("cpu") for _ in range(worldsize)]
-
-    # infinite device/worker iterators
-    worker = itertools.cycle(devices)
-
     # get numerical gradients
-    args = (_train1, _curpars, _xbds, _res1, _eps, _nbts1, _ndraws)
-    with mp.Pool(worldsize) as pool:
-        pool.starmap(get_numerical_grads, [args+(_, next(worker)) for _ in _algs])
+    get_numerical_grads(_train1, _curpars, _xbds, _res1, _eps, _nbts1, _ndraws, _algs1)
 
-    # get training performance
-    args = (_nbts2, _nreps, _train2, _pbds, _xbds, _res2, _eps)
-    cases = [args + (_, next(worker)) for _ in _algs]
-    cases.extend([args + ("analytical", next(worker))])
-    with mp.Pool(worldsize) as pool:
-        pool.starmap(bootstrapping, cases)
+    # get simulation-based inference
+    bootstrapper(_algs2, _ntrain2, _nbts2, _nreps, _pbds, _xbds, _res2, _anspars, _eps)
 
     # save data
     torch.save({
         "truegrads": _truegrads, "ndraws": _ndraws,
-        "ntrain1": _ntrain1, "ntrain2": _ntrain2,
-        "train1": _train1, "train2": _train2,
+        "ntrain1": _ntrain1, "ntrain2": _ntrain2, "train1": _train1,
         "res1": _res1, "res2": _res2,
-        "algs": _algs, "curpars": _curpars, "anspars": _anspars, "pbounds": _pbds,
+        "algs1": _algs1, "_algs2": _algs2,
+        "curpars": _curpars, "anspars": _anspars, "pbounds": _pbds,
         "xbounds": _xbds, "eps": _eps, "tol": _tol,
     }, figdir.joinpath("meta.dat"))
