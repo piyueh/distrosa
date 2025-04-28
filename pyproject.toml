@@ -22,7 +22,7 @@ classifiers = [
 ]
 dynamic = ["version",]
 requires-python = ">=3.12"
-dependencies = ["torch~=2.6", "numpy>=2.1", "psutil>=7.0"]
+dependencies = ["torch~=2.6", "numpy>=2.1", "psutil>=7.0", "cupy-cuda12x>=13.4"]
 
 [project.urls]
 homepage = "https://gitlab.com/ahmedattia/distrosa"

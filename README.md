@@ -1,78 +1,66 @@
-# Distributional Sensitivity Analysis
+# DistroSA: *Distr*ibuti*o*nal *S*ensitivity *A*nalysis
 
-This package develops novel algorithmic approaches for distributional sensitivity analysis. 
-Specifically, we develop a new empirical algorithm for calculating derivative of any probability distribution
-parameters with respect to perturbations in realization of the random variable. 
-This is critical for machine learning applications that seek to fit a probability distribution 
-to observational data.
+This package provides implementations for estimating the gradients of random variables with respect to distributional parameters for black-box probability density functions (PDFs) and sampling subroutines. It is a re-implementation of [this code](https://gitlab.com/ahmedattia/distributional_sensitivity_analysis), with the goal of integrating into PyTorch's automatic differentiation.
+
+## License Notice
+
+This code currently does not have an open-source license. If you have access to this code, please ensure you obtain explicit permission from one of the following authors:
+* Ahmed Attia (`aattia at anl.gov`)
+* Pi-Yueh Chuang (`pchuang at anl.gov`)
+* Emil Constantinescu (`emconsta at anl.gov`)
+
+## Dependencies
+
+Note that package names are based on the PyPI registry and may differ in Conda (e.g., CuPy has a different package name in the Conda ecosystem).
+
+### Mandatory
+
+* `numpy>=2.1`
+* `torch~=2.6`
+
+### Optional
+
+These optional dependencies are required for certain utilities in `distrosa.utils` and some cases in `benchmarks`:
+* `psutil>=7.0`
+* `cupy-cuda12x>=13`
+
+For plotting scripts in `benchmarks`:
+* `matplotlib>=3.10`
+
+## Installation
+
+To install, clone the repository, navigate into it, and run the following command:
+
+```bash
+$ pip install ./
+```
+
+## Usage
+
+This package provides four main gradient calculators for realizations (or space points) of a random vector with respect to distributional parameters:
+
+* `SensitivityND`
+* `SensitivityNDDiag`
+* `SensitivityNDInterp`
+* `SensitivityNDDiagInterp`
+
+They all share the same signature for creating a new instance. Refer to `examples/basic.py` for a basic example.
 
 ## Caveats
 
 ### Floating Precision
 
-The temporary tensors created and used during all calculations do not explicitly specify
-the floating precision, and will default to 32bit floats if not specified (because this
-is PyTorch's default).
-
-So users should explicitly change PyTorch's default floating precision to `float64` if
-that is desired (via `torch.set_default_dtype(torch.float64)` in the very beginning of
-an application code).
-
-This will ensure that all temporary tensors created and used during calculations will be
-of type 64bit floats.
-
-Note that merely changing the precision of user-provided input tensors will not change
-the precision for these temporary tensors.
-
-Using `.to(torch.float64)` after a PyTorch module is created will not help either, as
-these temporary or hidden tensors are created with `float32` initially.
+Temporary tensors created during calculations default to 32-bit floats unless specified otherwise, as this is PyTorch's default. If 64-bit precision is desired, set PyTorch's default floating precision to `float64` using `torch.set_default_dtype(torch.float64)` at the start of your application. Note that changing the precision of input tensors alone will not affect the precision of temporary tensors.
 
 ### Vectorization
 
-If using `torch.autograd.functional.jacobian` to get the Jacobian matrix of multiple
-points with respect to the parameters of the distribution, this function will apply
-the gradient calculation point by point.
-This means it will not enjoy the performance benefits of vectorization.
-This is due to that PyTorch does not have real automatic differentiation of vectorized
-output with respect to vectorized input.
-
-On the other hand, if using some thing like `loss.backward()` to get the gradient of a
-scalar loss with respect to the parameters of the distribution, then it will be fine.
+This is a limitation of PyTorch rather than the code. When using `torch.autograd.functional.jacobian` to compute the Jacobian matrix of multiple space points with respect to distribution parameters, calculations occur point by point, which does not benefit from vectorization. However, using methods like `loss.backward()` for scalar loss gradients with respect to distribution parameters is efficient.
 
 ### `torch.jit.script`
 
-Currently, only `Sensitivity1D`, `SensitivityND`, and `SensitivityDDDiag` works with
-`torch.jit.script`.
+Not all calculators are compatible with `torch.jit.script`. Further investigation is needed, though performance optimization is not the current focus.
 
 ### Peak Memory Consumption
 
-In order to exploit the performance benefits of array/tensor operations, many
-intermediate huge tensors are created during the calculations. This can lead to high peak
-memory consumption, causing out-of-memory (OOM) errors.
-This happends especially when using `SensitivityND` and `SensitivityNDDiag`.
-We have some batching mechanism in place to reduce the peak memory consumption, which
-hard-codes some intermediate tensors to have only 1GB memory consumptions.
-However, depending on how users implement other things, OOM may still happen.
-Though this can be improved by further refactorizing the code, we don't currently have
-a plan to do so because `SensitivityND` and `SensitivityNDDiag` are rarely used in real
-applications.
+As this code serves as a proof-of-concept for proposed numerical methods in our publications, memory optimization has not been prioritized. Be mindful of memory consumption.
 
-## Installation:
-
-### Create virual environment (Only Once)
-```
-python -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-```
-
-### Install the package under name `distrosa`  (Only when you pull a newer version)
-```
-pip install -e .
-```
-
-##Usage
-In your code just load the package and/or its modules, e.g., 
-```
-from distrosa import derivatives_calculators
-```
