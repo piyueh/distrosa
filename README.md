@@ -1,4 +1,4 @@
-# DistroSA: *Distr*ibuti*o*nal *S*ensitivity *A*nalysis
+# DistroSA: <ins>Distr</ins>ibuti<ins>o</ins>nal <ins>S</ins>ensitivity <ins>A</ins>nalysis
 
 This package provides implementations for estimating the gradients of random variables with respect to distributional parameters for black-box probability density functions (PDFs) and sampling subroutines. It is a re-implementation of [this code](https://gitlab.com/ahmedattia/distributional_sensitivity_analysis), with the goal of integrating into PyTorch's automatic differentiation.
 
