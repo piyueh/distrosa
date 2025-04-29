@@ -2,12 +2,15 @@
 
 This package provides implementations for estimating the gradients of random variables with respect to distributional parameters for black-box probability density functions (PDFs) and sampling subroutines. It is a re-implementation of [this code](https://gitlab.com/ahmedattia/distributional_sensitivity_analysis), with the goal of integrating into PyTorch's automatic differentiation.
 
-## License Notice
+## License and Copyright Notice
 
 This code currently does not have an open-source license. If you have access to this code, please ensure you obtain explicit permission from one of the following authors:
+
 * Ahmed Attia (`aattia at anl.gov`)
 * Pi-Yueh Chuang (`pchuang at anl.gov`)
 * Emil Constantinescu (`emconsta at anl.gov`)
+
+Argonne National Laboratory owns the copyright and reserve all rights.
 
 ## Dependencies
 

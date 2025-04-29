@@ -1,0 +1,7 @@
+This code currently does not have an open-source license. If you have access to this code, please ensure you obtain explicit permission from one of the following authors:
+
+* Ahmed Attia (aattia at anl.gov)
+* Pi-Yueh Chuang (pchuang at anl.gov)
+* Emil Constantinescu (emconsta at anl.gov)
+
+Copyright © 2024-2025 Argonne National Laboratory All Rights Reserved
