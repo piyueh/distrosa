@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
 # vim:fenc=utf-8
 
-"""1D Gaussian verification.
-"""
+"""1D Gaussian verification."""
+
 import itertools
 import matplotlib.pyplot as pyplot
 import numpy
 import torch
 
 # default plotting settings
-pyplot.rcParams.update({
-    "font.size": 8,  # default font size for normal text
-    "axes.labelsize": "small",
-    "axes.titlesize": "medium",
-    "xtick.labelsize": "small",
-    "ytick.labelsize": "small",
-    "legend.fontsize": "small",
-    "legend.title_fontsize": "small",
-    "figure.dpi": 768,
-    "figure.titlesize": "medium",
-    "figure.constrained_layout.use": True,
-    "lines.linewidth": 1.0,
-    "image.cmap": "turbo",
-    "savefig.dpi": 768,
-    "savefig.format": "png",
-    "savefig.bbox": "tight"
-})
+pyplot.rcParams.update(
+    {
+        "font.family": "serif",
+        "font.size": 10,  # default font size for normal text
+        "mathtext.fontset": "dejavuserif",
+        "axes.labelsize": "medium",
+        "axes.titlesize": "medium",
+        "xtick.labelsize": "small",
+        "ytick.labelsize": "small",
+        "legend.fontsize": "small",
+        "legend.title_fontsize": "small",
+        "figure.dpi": 768,
+        "figure.titlesize": "medium",
+        "figure.constrained_layout.use": True,
+        "lines.linewidth": 1.0,
+        "image.cmap": "turbo",
+        "savefig.dpi": 768,
+        "savefig.format": "pdf",
+        "savefig.bbox": "tight",
+    }
+)
 
 # line styles
 linestyles = ["dashdot", "dashed", (0, (1, 1))]
@@ -41,22 +45,19 @@ alglbls = {
 
 
 def plot_sensitivity(x, ans, computed, params, figdir):
-    """Plot the sensitivity results.
-    """
+    """Plot the sensitivity results."""
 
     # name for derivatives
     names = [r"mu", r"sigma"]
 
     for i in range(2):
-
         # restart the line style iterator
         lscycler = itertools.cycle(linestyles)
 
-        fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
+        fig, ax = pyplot.subplots(1, 1, figsize=(3.25, 1.75))
         ax.plot(x, ans[..., i], label="Analytical", lw=2, color="k")
 
         for alg, data in computed.items():
-
             # line label and styles
             pltprops = dict(label=alglbls[alg], alpha=0.85, ls=next(lscycler))
 
@@ -64,20 +65,22 @@ def plot_sensitivity(x, ans, computed, params, figdir):
             ax.plot(x, data[max(data.keys())][..., i], **pltprops)  # type: ignore
 
         # plot lines to indicate the domain of interest
-        ax.axvline(params[0]-4*params[1], color="gray", ls="--", lw=0.5)
-        ax.axvline(params[0]+4*params[1], color="gray", ls="--", lw=0.5)
+        ax.axvline(params[0] - 4 * params[1], color="gray", ls="--", lw=0.5)
+        ax.axvline(params[0] + 4 * params[1], color="gray", ls="--", lw=0.5)
 
-        ax.set_xlim(params[0]-5*params[1], params[0]+5*params[1])
+        ax.set_xlim(params[0] - 5 * params[1], params[0] + 5 * params[1])
         ax.set_xlabel(r"$x$")
         ax.set_ylabel(rf"$\partial x \slash \partial \{names[i]}$")
-        ax.legend(loc=0)
+
+        if i == 0:
+            ax.legend(loc="lower center", ncols=2, bbox_to_anchor=(0.5, 0.0))
+
         fig.savefig(figdir.joinpath(f"sensitivity_{names[i]}"))
         pyplot.close(fig)
 
 
 def plot_errors(x, ans, pdfvals, computed, params, figdir):
-    """Calculate and plot L1 errors.
-    """
+    """Calculate and plot L1 errors."""
     # these were saved as torch.tensors; now convert to numpy
     x = x.numpy()
     params = params.numpy()
@@ -85,9 +88,11 @@ def plot_errors(x, ans, pdfvals, computed, params, figdir):
     pdfvals = pdfvals.numpy()
 
     # only integrate over the domain of interest
-    locs = numpy.where(numpy.logical_and(
-        x >= params[0]-4*params[1], x <= params[0]+4*params[1]
-    ))
+    locs = numpy.where(
+        numpy.logical_and(
+            x >= params[0] - 4 * params[1], x <= params[0] + 4 * params[1]
+        )
+    )
 
     errs = [{}, {}]
     nvs = {}
@@ -101,21 +106,14 @@ def plot_errors(x, ans, pdfvals, computed, params, figdir):
             errs[1].setdefault(alg, []).append(out[1])
             nvs.setdefault(alg, []).append(res)
 
-    # tunes location for legends
-    lgdcfg = [
-        dict(loc="center right", bbox_to_anchor=(0.999, 0.45)),
-        dict(loc="center right", bbox_to_anchor=(0.999, 0.43))
-    ]
-
     # name for derivatives
     names = [r"mu", r"sigma"]
 
     for i in range(2):
-
         # restart the line style iterator
         lscycler = itertools.cycle(linestyles)
 
-        fig, ax = pyplot.subplots(1, 1, figsize=(2.5, 2.5))
+        fig, ax = pyplot.subplots(1, 1, figsize=(3.25, 1.75))
         for alg, err in errs[i].items():
             pltprops = dict(label=alglbls[alg], ls=next(lscycler))
             ax.plot(nvs[alg], err, **pltprops)  # type: ignore
@@ -133,25 +131,47 @@ def plot_errors(x, ans, pdfvals, computed, params, figdir):
         ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display -> data
         oy2 = ox1 * oy1 / ox2
         ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
-        ax.text(
-            ox2*10**0.1, oy2, r"$\mathcal{O}(N^{-1})$", fontsize="x-small", ha="left",
-            va="bottom", bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
-        )
+
+        if i == 0:
+            ax.text(
+                ox2 * 10**0.1,
+                oy2,
+                r"$\mathcal{O}(N^{-1})$",
+                fontsize="x-small",
+                ha="left",
+                va="bottom",
+                bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75),
+            )
+        else:
+            ax.text(
+                ox2 / 10**0.6,
+                oy2 * 10**0.6,
+                r"$\mathcal{O}(N^{-1})$",
+                fontsize="x-small",
+                ha="left",
+                va="bottom",
+                bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75),
+            )
 
         # plot 2nd order reference
         ox1, oy1 = ax.transAxes.transform((0.1, 0.75))  # axes -> display
         ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display -> data
         ox2, oy2 = ax.transAxes.transform((0.5, 0.75))  # axes -> display
         ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display -> data
-        oy2 = (ox1 / ox2)**2 * oy1
+        oy2 = (ox1 / ox2) ** 2 * oy1
         ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
         ax.text(
-            ox1*3.16, oy1*(oy2/oy1)**0.5, r"$\mathcal{O}(N^{-2})$", fontsize="x-small",
-            ha="right", va="top",
-            bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
+            ox1 * 3.16,
+            oy1 * (oy2 / oy1) ** 0.5,
+            r"$\mathcal{O}(N^{-2})$",
+            fontsize="x-small",
+            ha="right",
+            va="top",
+            bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75),
         )
 
-        ax.legend(**lgdcfg[i])
+        if i == 1:
+            ax.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0))
 
         fig.savefig(figdir.joinpath(f"error_{names[i]}"))
         pyplot.close(fig)

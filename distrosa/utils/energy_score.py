@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 # vim:fenc=utf-8
 
-"""Differentiable empirical and analytical energy score implementations.
-"""
+"""Differentiable empirical and analytical energy score implementations."""
+
 import pathlib
 import psutil
 import numpy
-import cupy
 import torch
 from typing import Callable
 from typing import Sequence
 from torch import Tensor
 
+# cuda via cupy
+try:
+    import cupy
 
-if torch.cuda.is_available():
     cusrc = pathlib.Path(__file__).resolve().parent.joinpath("energy_score.cu")
     with open(cusrc, "r") as fp:
         code = fp.read()
     _m = cupy.RawModule(code=code, jitify=True, options=("--dopt=on",))
     _cu_kernel_xy = _m.get_function("_kernel_xy")
-else:
+except ImportError:
+
     def _cu_kernel_xy(*args, **kwargs):
         raise NotImplementedError("CUDA not available")
 
@@ -65,8 +67,8 @@ class AnalyticalEnergyScore(torch.nn.Module):
         ws = []
         _lims = bounds.cpu().detach().numpy()
         for i in range(self.ndim):
-            qs.append((q+1.0)*(_lims[i][1]-_lims[i][0])/2.0+_lims[i][0])
-            ws.append(w*(_lims[i][1]-_lims[i][0])/2.0)
+            qs.append((q + 1.0) * (_lims[i][1] - _lims[i][0]) / 2.0 + _lims[i][0])
+            ws.append(w * (_lims[i][1] - _lims[i][0]) / 2.0)
 
         # generate the whole quadrature gridline; qs: (nq**ndim, ndim), ws: (nq**ndim,)
         qs = numpy.meshgrid(*qs, indexing="ij")
@@ -82,12 +84,10 @@ class AnalyticalEnergyScore(torch.nn.Module):
         self.pdf = pdf
 
     def register(self, pdf: Callable[[Tensor, Tensor], Tensor]) -> None:
-        """Register the PDF function.
-        """
+        """Register the PDF function."""
         self.pdf = pdf
 
     def forward(self, params: Tensor, y: Tensor) -> Tensor:
-
         # even in 1D, we want to work with shape (..., 1)
         if y.ndim == 1:
             y = y.view(-1, 1)
@@ -167,9 +167,11 @@ class BlockAnalyticalEnergyScore(torch.nn.Module):
         ws = []
         for i in range(self.ndim):
             v = self.gridlines[i]  # alias
-            qs.append((q+1.0)*(v[1:]-v[:-1]).view(-1, 1)/2.0+v[:-1].view(-1, 1))
+            qs.append(
+                (q + 1.0) * (v[1:] - v[:-1]).view(-1, 1) / 2.0 + v[:-1].view(-1, 1)
+            )
             qs[-1] = qs[-1].view(-1)
-            ws.append(w*(v[1:]-v[:-1]).view(-1, 1)/2.0)
+            ws.append(w * (v[1:] - v[:-1]).view(-1, 1) / 2.0)
             ws[-1] = ws[-1].view(-1)
 
         # generate the whole quadrature gridline; qs: (nq**ndim, ndim), ws: (nq**ndim,)
@@ -186,12 +188,10 @@ class BlockAnalyticalEnergyScore(torch.nn.Module):
         return super().to(*args, **kwargs)
 
     def register(self, pdf: Callable[[Tensor, Tensor], Tensor]) -> None:
-        """Register the PDF function.
-        """
+        """Register the PDF function."""
         self.pdf = pdf
 
     def forward(self, params: Tensor, y: Tensor) -> Tensor:
-
         # even in 1D, we want to work with shape (..., 1)
         if y.ndim == 1:
             y = y.view(-1, 1)
@@ -212,20 +212,20 @@ class BlockAnalyticalEnergyScore(torch.nn.Module):
         if pdfvals.device.type == "cuda":
             avail = torch.cuda.mem_get_info()[0]  # in bytes
             avail /= 4
-            bsize = int((avail/(self.ndim*8))**0.5)
+            bsize = int((avail / (self.ndim * 8)) ** 0.5)
         else:  # assume CPU
             avail = psutil.virtual_memory().available  # in bytes
             avail /= 4
-            bsize = int((avail/(self.ndim*8))**0.5)
+            bsize = int((avail / (self.ndim * 8)) ** 0.5)
 
         # score 1
         score1 = torch.tensor(0.0, dtype=params.dtype, device=params.device)
         for bi in range(0, self.qs.shape[0], bsize):
-            x = self.qs[bi:bi+bsize]
-            w = self.ws[bi:bi+bsize]
-            vals = pdfvals[bi:bi+bsize]
+            x = self.qs[bi : bi + bsize]
+            w = self.ws[bi : bi + bsize]
+            vals = pdfvals[bi : bi + bsize]
             for bj in range(0, y.shape[0], bsize):
-                ybatch = y[bj:bj+bsize]
+                ybatch = y[bj : bj + bsize]
                 nograd = torch.cdist(x, ybatch, 2.0).sum(dim=1) * w
                 tmp = (nograd * vals).sum() / y.shape[0]
                 score1 = score1 + tmp
@@ -233,13 +233,13 @@ class BlockAnalyticalEnergyScore(torch.nn.Module):
         # score 2
         score2 = torch.tensor(0.0, dtype=params.dtype, device=params.device)
         for bi in range(0, self.qs.shape[0], bsize):
-            x = self.qs[bi:bi+bsize]
-            xw = self.ws[bi:bi+bsize]
-            xvals = pdfvals[bi:bi+bsize]
+            x = self.qs[bi : bi + bsize]
+            xw = self.ws[bi : bi + bsize]
+            xvals = pdfvals[bi : bi + bsize]
             for bj in range(0, self.qs.shape[0], bsize):
-                y = self.qs[bj:bj+bsize]
-                yw = self.ws[bj:bj+bsize]
-                yvals = pdfvals[bj:bj+bsize]
+                y = self.qs[bj : bj + bsize]
+                yw = self.ws[bj : bj + bsize]
+                yvals = pdfvals[bj : bj + bsize]
                 nograd = torch.cdist(x, y, 2.0)
                 torch.multiply(nograd, xw.view(-1, 1), out=nograd)
                 torch.multiply(nograd, yw.view(1, -1), out=nograd)
@@ -300,8 +300,7 @@ class torch_empirical_energy_score(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x: Tensor, y: Tensor) -> Tensor:
-        """Energy score.
-        """
+        """Energy score."""
 
         # remember the original shape of `x`
         xshape = x.shape
@@ -323,11 +322,11 @@ class torch_empirical_energy_score(torch.autograd.Function):
         if x.device.type == "cuda":
             avail = torch.cuda.mem_get_info()[0]  # in bytes
             avail /= 2.5
-            bsize = int((avail/(x.shape[1]*8))**0.5)
+            bsize = int((avail / (x.shape[1] * 8)) ** 0.5)
         else:  # assume CPU
             avail = psutil.virtual_memory().available  # in bytes
             avail /= 2.5
-            bsize = int((avail/(x.shape[1]*8))**0.5)
+            bsize = int((avail / (x.shape[1] * 8)) ** 0.5)
 
         # calling the block-based energy score calculation
         with torch.no_grad():
@@ -342,11 +341,10 @@ class torch_empirical_energy_score(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: Tensor) -> tuple[Tensor, None]:  # type: ignore
-        """Backward pass.
-        """
+        """Backward pass."""
 
         assert grad_output.ndim == 0
-        jac, = ctx.saved_tensors  # (nx, ndim)
+        (jac,) = ctx.saved_tensors  # (nx, ndim)
         grad1 = grad_output * jac
 
         # only `x` is considerred differentiable
@@ -382,8 +380,7 @@ class cuda_empirical_energy_score(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x: Tensor, y: Tensor) -> Tensor:
-        """Energy score.
-        """
+        """Energy score."""
 
         # remember the original shape of `x`
         xshape = x.shape
@@ -414,11 +411,10 @@ class cuda_empirical_energy_score(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: Tensor) -> tuple[Tensor, None]:  # type: ignore
-        """Backward pass.
-        """
+        """Backward pass."""
 
         assert grad_output.ndim == 0
-        jac, = ctx.saved_tensors  # (nx, ndim)
+        (jac,) = ctx.saved_tensors  # (nx, ndim)
         grad1 = grad_output * jac
 
         # only `x` is considerred differentiable
@@ -438,9 +434,9 @@ def cuda_energy_score(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
     nx = int(x.shape[0])
     ny = int(y.shape[0])
     ndim = int(x.shape[1])
-    coeff1 = float(nx*ny)
-    coeff2 = float(-(nx*(nx-1))*2)
-    coeff3 = float(-(nx*(nx-1)))
+    coeff1 = float(nx * ny)
+    coeff2 = float(-(nx * (nx - 1)) * 2)
+    coeff3 = float(-(nx * (nx - 1)))
     assert ndim <= 12, "Currently only supports up to 12-D space points"
 
     # number of threads per block; number of blocks; number of grids
@@ -452,7 +448,7 @@ def cuda_energy_score(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
     assert nblky <= nblkmax, "len(y) too large"
 
     # final shared memory size; should not exceed 48KB; but no sanity check here
-    memsize = int(((ndim+1)*nths**2+2*ndim*nths)*8)
+    memsize = int(((ndim + 1) * nths**2 + 2 * ndim * nths) * 8)
 
     # non-copy conversion to cupy data type
     cux = cupy.asarray(x)
@@ -467,7 +463,7 @@ def cuda_energy_score(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
         (nblkx, nblky),  # number of blocks
         (nths, nths),  # number of threads per block
         (cux, cuy, cujac, cuscore, nx, ny, ndim, coeff1, coeff1),
-        shared_mem=memsize
+        shared_mem=memsize,
     )
 
     # score 2
@@ -475,7 +471,7 @@ def cuda_energy_score(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
         (nblkx, nblkx),  # number of blocks
         (nths, nths),  # number of threads per block
         (cux, cux, cujac, cuscore, nx, nx, ndim, coeff2, coeff3),
-        shared_mem=memsize
+        shared_mem=memsize,
     )
 
     # supposedly non-copy conversion back to torch data type
@@ -487,8 +483,7 @@ def cuda_energy_score(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
 
 @torch.jit.script
 def blocked_energy_score(x: Tensor, y: Tensor, bsize: int) -> tuple[Tensor, Tensor]:
-    """Blocked implementation for empirical energy loss with jacobian w.r.t. `x`.
-    """
+    """Blocked implementation for empirical energy loss with jacobian w.r.t. `x`."""
 
     # sanity checks can be turned off using `-O` command-line flag
     assert x.ndim == 2
@@ -506,10 +501,10 @@ def blocked_energy_score(x: Tensor, y: Tensor, bsize: int) -> tuple[Tensor, Tens
     jac = torch.zeros((nx, ndim), dtype=x.dtype, device=x.device)
 
     for i in range(0, nx, bsize):
-        xbatch = x[i:i+bsize]
+        xbatch = x[i : i + bsize]
 
         for j in range(0, ny, bsize):
-            ybatch = y[j:j+bsize]
+            ybatch = y[j : j + bsize]
 
             # dealing with dist1[i:i+bsize, j:j+bsize, :]
             rvec = xbatch.view(-1, 1, ndim) - ybatch.view(1, -1, ndim)  # (nx, ny, ndim)
@@ -518,16 +513,16 @@ def blocked_energy_score(x: Tensor, y: Tensor, bsize: int) -> tuple[Tensor, Tens
             rvec[r == 0.0] = 0.0
             rvec = torch.sum(rvec, dim=1)  # (nx, ndim)
 
-            jac[i:i+bsize, :] += (rvec / coeff1)
-            score += (torch.sum(r) / coeff1)
+            jac[i : i + bsize, :] += rvec / coeff1
+            score += torch.sum(r) / coeff1
             rvec = None
             r = None
 
     for i in range(0, nx, bsize):
-        xbatch = x[i:i+bsize]
+        xbatch = x[i : i + bsize]
 
         for j in range(0, nx, bsize):
-            ybatch = x[j:j+bsize]
+            ybatch = x[j : j + bsize]
 
             # dealing with dist2[i:i+bsize, j:j+bsize, :]
             rvec = xbatch.view(-1, 1, ndim) - ybatch.view(1, -1, ndim)
@@ -536,8 +531,8 @@ def blocked_energy_score(x: Tensor, y: Tensor, bsize: int) -> tuple[Tensor, Tens
             rvec[r == 0.0] = 0.0
             rvec = torch.sum(rvec, dim=1)  # (nx, ndim)
 
-            jac[i:i+bsize, :] -= (rvec / coeff2)
-            score -= (torch.sum(r) / coeff3)
+            jac[i : i + bsize, :] -= rvec / coeff2
+            score -= torch.sum(r) / coeff3
             rvec = None
             r = None
 
@@ -553,7 +548,6 @@ if __name__ == "__main__":
     _ndim = 2
 
     for i in range(20):
-
         # for cuda kernels
         _x1 = torch.rand((_nx, _ndim), dtype=torch.float64, device="cuda")
         _x1 = _x1.requires_grad_(True)
@@ -600,9 +594,9 @@ if __name__ == "__main__":
         _jac2 = _x2.grad.clone().detach().cpu().numpy()  # type: ignore
         _jac3 = _x3.grad.clone().detach().cpu().numpy()  # type: ignore
 
-        print(_loss1, _jac1.mean(), (_ted1-_tbg1)/1e9)  # type: ignore
-        print(_loss2, _jac2.mean(), (_ted2-_tbg2)/1e9)  # type: ignore
-        print(_loss3, _jac3.mean(), (_ted3-_tbg3)/1e9)  # type: ignore
+        print(_loss1, _jac1.mean(), (_ted1 - _tbg1) / 1e9)  # type: ignore
+        print(_loss2, _jac2.mean(), (_ted2 - _tbg2) / 1e9)  # type: ignore
+        print(_loss3, _jac3.mean(), (_ted3 - _tbg3) / 1e9)  # type: ignore
         print()
 
         assert numpy.allclose(_loss1, _loss2, 0.0, 1e-10)

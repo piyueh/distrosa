@@ -1,5 +1,7 @@
-font.size: 8
-axes.labelsize: small
+font.family: serif
+font.size: 10
+mathtext.fontset: dejavuserif
+axes.labelsize: medium
 axes.titlesize: medium
 xtick.labelsize: small
 ytick.labelsize: small
@@ -11,5 +13,5 @@ figure.constrained_layout.use: True
 lines.linewidth: 1.0
 image.cmap: turbo
 savefig.dpi: 768
-savefig.format: png
+savefig.format: pdf
 savefig.bbox: tight

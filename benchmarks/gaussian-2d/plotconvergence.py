@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # vim:fenc=utf-8
 
-"""Plot error convergences.
-"""
+"""Plot error convergences."""
+
 import itertools
 import numpy
 import torch
@@ -28,63 +28,69 @@ pnames = ["mu_1", "mu_2", "sigma_1", "sigma_2", "rho"]
 
 
 def plot_convergences(nvs, convs, figdir):
-    """Plot the error convergence.
-    """
+    """Plot the error convergence."""
     keys = sorted(convs.keys(), key=lambda x: int(x[-1]))
     convs = {k: convs[k] for k in keys}
 
+    for i in range(2):
+        fig = pyplot.figure(figsize=(6.5, 3.0))
+        gs = fig.add_gridspec(1, 6, width_ratios=[1, 1, 1, 1, 1, 0.4])
+        axs = []
+        for j in range(5):
+            lscycler = itertools.cycle(linestyles)
+            lines = []
 
-    for ij in itertools.product(range(2), range(5)):
+            print(f"plotting convergence ({i}, {j})")
 
-        i, j = ij
-        lscycler = itertools.cycle(linestyles)
+            if j != 0:
+                ax = fig.add_subplot(gs[j], sharey=axs[0])
+            else:
+                ax = fig.add_subplot(gs[j])
+            axs.append(ax)
 
-        print(f"plotting convergence ({i}, {j})")
+            for alg, dset in convs.items():
+                ls = next(lscycler)
+                lines.append(ax.plot(nvs, dset[:, i, j], label=alglbls[alg], ls=ls)[0])
 
-        fig = pyplot.figure(figsize=(2.5, 2.5))
-        gs = fig.add_gridspec(1, 1)
-        ax = fig.add_subplot(gs[0, 0])
+            ax.set_aspect("equal", adjustable="box")
+            ax.grid(True, which="both", zorder=-1, lw=0.25, color="gainsboro")
 
-        for alg, dset in convs.items():
-            ls = next(lscycler)
-            ax.plot(nvs, dset[:, i, j], label=alglbls[alg], ls=ls)
+            ax.set_xscale("log")
+            ax.set_xlabel(r"$N$")
+            ax.set_yscale("log")
+            ax.set_ylim(1e-5, 1e-1)
 
-        ax.grid(True, which="both", zorder=-1, lw=0.5)
+            if j != 0:
+                ax.tick_params("y", which="both", labelleft=False, labelright=False)
 
-        ax.set_xscale("log")
-        ax.set_xlabel(r"$N$")
-        ax.set_yscale("log")
-        ax.set_ylabel(rf"$L_1$ Error of $\partial {vnames[i]}/\partial \{pnames[j]}$")
+            # plot 1st order reference
+            ox1, oy1 = ax.transAxes.transform((0.1, 1.05))  # axes -> display
+            ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display -> data
+            ox2, oy2 = ax.transAxes.transform((0.75, 1.05))  # axes -> display
+            ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display -> data
+            oy2 = (ox1 / ox2) ** 2 * oy1
+            ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
+            ax.text(
+                ox2 * 10**0.2,
+                oy2 * 10**2.0,
+                r"$\mathcal{O}(N^{-2})$",
+                fontsize="small",
+                ha="right",
+                va="top",
+                bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75),
+            )
 
-        # plot 1st order reference
-        ox1, oy1 = ax.transAxes.transform((0.1, 1.05))  # axes -> display
-        ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display -> data
-        ox2, oy2 = ax.transAxes.transform((0.5, 1.05))  # axes -> display
-        ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display -> data
-        oy2 = ox1 * oy1 / ox2
-        ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
-        ax.text(
-            ox2/10**0.2, oy2*10**0.9, r"$\mathcal{O}(N^{-1})$", fontsize="x-small",
-            ha="right", va="top",
-            bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
-        )
+            ax.set_title(
+                rf"$\frac{{\partial {vnames[i]}}}{{\partial \{pnames[j]}}}$",
+                fontsize="x-large",
+            )
 
-        # plot 2nd order reference
-        ox1, oy1 = ax.transAxes.transform((0.1, 0.5))  # axes -> display
-        ox1, oy1 = ax.transData.inverted().transform((ox1, oy1))  # display -> data
-        ox2, oy2 = ax.transAxes.transform((0.5, 0.5))  # axes -> display
-        ox2, oy2 = ax.transData.inverted().transform((ox2, oy2))  # display -> data
-        oy2 = (ox1 / ox2)**2 * oy1
-        ax.plot([ox1, ox2], [oy1, oy2], "k--", lw=1.0)
-        ax.text(
-            ox1*2.1, oy1*(oy2/oy1)**0.5, r"$\mathcal{O}(N^{-2})$", fontsize="x-small",
-            ha="right", va="top",
-            bbox=dict(boxstyle="square", color="w", lw=None, alpha=0.75)
-        )
+        # legend
+        ax = fig.add_subplot(gs[5])
+        ax.axis("off")
+        ax.legend(handles=lines, loc="center", fontsize="small")
 
-        ax.legend(loc="upper right", bbox_to_anchor=(1.02, 1.02))
-
-        fig.savefig(figdir.joinpath(f"converge_{i}_{j}"))
+        fig.savefig(figdir.joinpath(f"converge_{i}"))
 
         pyplot.close(fig)
 

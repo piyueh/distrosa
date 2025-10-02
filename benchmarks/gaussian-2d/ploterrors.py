@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # vim:fenc=utf-8
 
-"""Plot absolute error contours.
-"""
+"""Plot absolute error contours."""
+
 import itertools
 import numpy
 import torch
@@ -12,12 +12,10 @@ import matplotlib.cm as mcm
 
 
 def plot_errors(x, errors, mask, figdir):
-    """Plot the sensitivities.
-    """
+    """Plot the sensitivities."""
 
     # plotting
     for key in itertools.product(errors.items(), range(2), range(5)):
-
         (alg, dset), i, j = key  # type: ignore
         res = dset[-1].shape[0]
         err = dset[-1][..., i, j]
@@ -36,24 +34,24 @@ def plot_errors(x, errors, mask, figdir):
 
         # contourf configurations
         ctfargs = dict(
-            levels=numpy.power(10., numpy.arange(vmin, vmax+1)),
+            levels=numpy.power(10.0, numpy.arange(vmin, vmax + 1)),
             norm=mcolors.LogNorm(vmin=10**vmin, vmax=10**vmax),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         )
 
         # colorbar configurations
         cbarargs = dict(
-            mappable=mcm.ScalarMappable(ctfargs["norm"], ctfargs["cmap"]),# type: ignore
-            orientation="horizontal",
-            extend="both"
+            mappable=mcm.ScalarMappable(ctfargs["norm"], ctfargs["cmap"]),  # type: ignore
+            orientation="vertical",
+            extend="both",
         )
 
-        fig = pyplot.figure(figsize=(2.5, 3.0))
+        fig = pyplot.figure(figsize=(3.25, 2.0))
         gs = fig.add_gridspec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
         cf = ax.contourf(x[..., 0], x[..., 1], merr, **ctfargs)
-        ax.set_aspect("equal", adjustable="box")
+        # ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel(r"$x_1$")
         ax.set_ylabel(r"$x_2$")
         fig.colorbar(ax=ax, **cbarargs)  # type: ignore

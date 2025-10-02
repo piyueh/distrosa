@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # vim:fenc=utf-8
 
-"""Plot sensitivities.
-"""
+"""Plot sensitivities."""
+
 import itertools
 import numpy
 import torch
@@ -13,8 +13,7 @@ import matplotlib.cm as mcm
 
 
 def fullmtxcfg(params):
-    """Return the configurations for contourf plots.
-    """
+    """Return the configurations for contourf plots."""
 
     _, _, sigma1, sigma2, rho = params
     coeff1 = sigma1 / (1 - rho * rho)
@@ -25,79 +24,79 @@ def fullmtxcfg(params):
 
     ctf_kwargs = {
         (0, 0): dict(
-            levels=1.0+zeroscale,
-            norm=mcolors.BoundaryNorm(1.0+zeroscale, 256),
+            levels=1.0 + zeroscale,
+            norm=mcolors.BoundaryNorm(1.0 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 1): dict(
             levels=zeroscale,
             norm=mcolors.BoundaryNorm(zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 2): dict(
-            levels=numpy.linspace(-5., 5., 64),
-            norm=mcolors.Normalize(vmin=-5., vmax=5.),
+            levels=numpy.linspace(-5.0, 5.0, 64),
+            norm=mcolors.Normalize(vmin=-5.0, vmax=5.0),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 3): dict(
             levels=zeroscale,
             norm=mcolors.BoundaryNorm(zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 4): dict(
-            levels=numpy.linspace(-coeff1*5., coeff1*5., 64),
-            norm=mcolors.Normalize(-coeff1*5., coeff1*5., clip=False),
+            levels=numpy.linspace(-coeff1 * 5.0, coeff1 * 5.0, 64),
+            norm=mcolors.Normalize(-coeff1 * 5.0, coeff1 * 5.0, clip=False),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 0): dict(
             levels=zeroscale,
             norm=mcolors.BoundaryNorm(zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 1): dict(
-            levels=1.0+zeroscale,
-            norm=mcolors.BoundaryNorm(1.0+zeroscale, 256),
+            levels=1.0 + zeroscale,
+            norm=mcolors.BoundaryNorm(1.0 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 2): dict(
             levels=zeroscale,
             norm=mcolors.BoundaryNorm(zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 3): dict(
-            levels=numpy.linspace(-5., 5., 64),
-            norm=mcolors.Normalize(vmin=-5., vmax=5.),
+            levels=numpy.linspace(-5.0, 5.0, 64),
+            norm=mcolors.Normalize(vmin=-5.0, vmax=5.0),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 4): dict(
-            levels=numpy.linspace(-coeff2*5., coeff2*5., 64),
-            norm=mcolors.Normalize(-coeff2*5., coeff2*5., clip=False),
+            levels=numpy.linspace(-coeff2 * 5.0, coeff2 * 5.0, 64),
+            norm=mcolors.Normalize(-coeff2 * 5.0, coeff2 * 5.0, clip=False),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
-        )
+            extend="both",
+        ),
     }
 
     def oneformatter(x, pos):
-        return rf"${'-' if x-1 <= 0 else '+'}10^{{{int(numpy.log10(abs(x-1))-0.4)}}}$"
+        return rf"${'-' if x - 1 <= 0 else '+'}10^{{{int(numpy.log10(abs(x - 1)) - 0.4)}}}$"
 
     def zeroformatter(x, pos):
-        return rf"${'-' if x <= 0 else '+'}10^{{{int(numpy.log10(abs(x))-0.4)}}}$"
+        return rf"${'-' if x <= 0 else '+'}10^{{{int(numpy.log10(abs(x)) - 0.4)}}}$"
 
     cbar_kwargs = {}
     for key in ctf_kwargs.keys():
         cbar_kwargs.setdefault(key, {})["mappable"] = mcm.ScalarMappable(
             norm=ctf_kwargs[key]["norm"], cmap=ctf_kwargs[key]["cmap"]
         )
-        cbar_kwargs[key]["orientation"] = "horizontal"
+        cbar_kwargs[key]["orientation"] = "vertical"
         cbar_kwargs[key]["extend"] = ctf_kwargs[key]["extend"]
 
     cbar_kwargs[(0, 0)]["format"] = mticker.FuncFormatter(oneformatter)
@@ -122,8 +121,7 @@ def fullmtxcfg(params):
 
 
 def diagapprox(params):
-    """Return the configurations for contourf plots.
-    """
+    """Return the configurations for contourf plots."""
 
     _, _, sigma1, sigma2, rho = params
     coeff1 = sigma1 / (1 - rho * rho)
@@ -132,96 +130,96 @@ def diagapprox(params):
     zeroscale = numpy.logspace(-3, -1, 3)
     zeroscale = numpy.concatenate([-zeroscale[::-1], zeroscale])
 
-    ans01 = - rho * sigma1 / sigma2
-    ans03 = 5. * rho * sigma1 / sigma2
-    ans04_l = - sigma1 * (rho * 5. + 5.) / (1 - rho * rho)
-    ans04_h = sigma1 * (rho * 5. + 5.) / (1 - rho * rho)
-    ans10 = - rho * sigma2 / sigma1
-    ans12 = 5. * rho * sigma2 / sigma1
-    ans14_l = - sigma2 * (5. + rho * 5.) / (1 - rho * rho)
-    ans14_h = sigma2 * (5. + rho * 5.) / (1 - rho * rho)
+    ans01 = -rho * sigma1 / sigma2
+    ans03 = 5.0 * rho * sigma1 / sigma2
+    ans04_l = -sigma1 * (rho * 5.0 + 5.0) / (1 - rho * rho)
+    ans04_h = sigma1 * (rho * 5.0 + 5.0) / (1 - rho * rho)
+    ans10 = -rho * sigma2 / sigma1
+    ans12 = 5.0 * rho * sigma2 / sigma1
+    ans14_l = -sigma2 * (5.0 + rho * 5.0) / (1 - rho * rho)
+    ans14_h = sigma2 * (5.0 + rho * 5.0) / (1 - rho * rho)
 
     ctf_kwargs = {
         (0, 0): dict(  # ans: 1.0
-            levels=1.0+zeroscale,
-            norm=mcolors.BoundaryNorm(1.0+zeroscale, 256),
+            levels=1.0 + zeroscale,
+            norm=mcolors.BoundaryNorm(1.0 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 1): dict(  # ans: -rho * sigma1 / sigma2
-            levels=ans01+zeroscale,
-            norm=mcolors.BoundaryNorm(ans01+zeroscale, 256),
+            levels=ans01 + zeroscale,
+            norm=mcolors.BoundaryNorm(ans01 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 2): dict(  # ans: z1
-            levels=numpy.linspace(-5., 5., 64),
-            norm=mcolors.Normalize(vmin=-5., vmax=5.),
+            levels=numpy.linspace(-5.0, 5.0, 64),
+            norm=mcolors.Normalize(vmin=-5.0, vmax=5.0),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 3): dict(  # ans: -rho * z2 * sigma1 / sigma2
             levels=numpy.linspace(-ans03, ans03, 64),
             norm=mcolors.Normalize(-ans03, ans03),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (0, 4): dict(  # ans: -sigma1 * (rho * z1 - z2) / (1 - rho * rho)
             levels=numpy.linspace(ans04_l, ans04_h, 64),
             norm=mcolors.Normalize(ans04_l, ans04_h),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 0): dict(  # ans: -rho * sigma2 / sigma1
-            levels=ans10+zeroscale,
-            norm=mcolors.BoundaryNorm(ans10+zeroscale, 256),
+            levels=ans10 + zeroscale,
+            norm=mcolors.BoundaryNorm(ans10 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 1): dict(  # ans: 1.0
-            levels=1.0+zeroscale,
-            norm=mcolors.BoundaryNorm(1.0+zeroscale, 256),
+            levels=1.0 + zeroscale,
+            norm=mcolors.BoundaryNorm(1.0 + zeroscale, 256),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 2): dict(  # ans: -rho * z1 * sigma2 / sigma1
             levels=numpy.linspace(-ans12, ans12, 64),
             norm=mcolors.Normalize(-ans12, ans12),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 3): dict(  # ans: z2
-            levels=numpy.linspace(-5., 5., 64),
-            norm=mcolors.Normalize(vmin=-5., vmax=5.),
+            levels=numpy.linspace(-5.0, 5.0, 64),
+            norm=mcolors.Normalize(vmin=-5.0, vmax=5.0),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
+            extend="both",
         ),
         (1, 4): dict(
             levels=numpy.linspace(ans14_l, ans14_h, 64),
             norm=mcolors.Normalize(ans14_l, ans14_h),
             cmap=pyplot.get_cmap("turbo").with_extremes(bad="w"),
-            extend="both"
-        )
+            extend="both",
+        ),
     }
 
     def oneformatter(x, pos):
-        val = int(numpy.log10(abs(x-1))-0.4)
-        return rf"${'-' if x-1 <= 0 else '+'}10^{{{val}}}$"
+        val = int(numpy.log10(abs(x - 1)) - 0.4)
+        return rf"${'-' if x - 1 <= 0 else '+'}10^{{{val}}}$"
 
     def ans01formatter(x, pos):
-        val = int(numpy.log10(abs(x-ans01))-0.4)
-        return rf"${'-' if x-1 <= 0 else '+'}10^{{{val}}}$"
+        val = int(numpy.log10(abs(x - ans01)) - 0.4)
+        return rf"${'-' if x - 1 <= 0 else '+'}10^{{{val}}}$"
 
     def ans10formatter(x, pos):
-        val = int(numpy.log10(abs(x-ans10))-0.4)
-        return rf"${'-' if x-1 <= 0 else '+'}10^{{{val}}}$"
+        val = int(numpy.log10(abs(x - ans10)) - 0.4)
+        return rf"${'-' if x - 1 <= 0 else '+'}10^{{{val}}}$"
 
     cbar_kwargs = {}
     for key in ctf_kwargs.keys():
         cbar_kwargs.setdefault(key, {})["mappable"] = mcm.ScalarMappable(
             norm=ctf_kwargs[key]["norm"], cmap=ctf_kwargs[key]["cmap"]
         )
-        cbar_kwargs[key]["orientation"] = "horizontal"
+        cbar_kwargs[key]["orientation"] = "vertical"
         cbar_kwargs[key]["extend"] = ctf_kwargs[key]["extend"]
 
     cbar_kwargs[(0, 0)]["format"] = mticker.FuncFormatter(oneformatter)
@@ -240,33 +238,32 @@ def diagapprox(params):
 
 
 def plot_dist(x, vals, params, mask, figdir):
-    """Plot the 2D Gaussian distribution.
-    """
+    """Plot the 2D Gaussian distribution."""
 
     # contourf configurations
     ctfargs = dict(
         levels=64,
         norm=mcolors.Normalize(vmin=vals.min(), vmax=vals.max()),
         cmap=pyplot.get_cmap("turbo"),
-        extend="neither"
+        extend="neither",
     )
 
     # colorbar configurations
     cbarargs = dict(
         format=mticker.ScalarFormatter(),
         mappable=mcm.ScalarMappable(ctfargs["norm"], ctfargs["cmap"]),  # type: ignore
-        orientation="horizontal",
-        extend="neither"
+        orientation="vertical",
+        extend="neither",
     )
 
     mvals = numpy.ma.array(vals, mask=~mask)
 
     # plot
-    fig = pyplot.figure(figsize=(2.5, 3.0))
+    fig = pyplot.figure(figsize=(3.25, 2.0))
     gs = fig.add_gridspec(1, 1)
     ax = fig.add_subplot(gs[0, 0])
     ax.contourf(x[..., 0], x[..., 1], mvals, **ctfargs)
-    ax.set_aspect("equal", adjustable="box")
+    # ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$x_1$")
     ax.set_ylabel(r"$x_2$")
     fig.colorbar(**cbarargs, ax=ax)  # type: ignore
@@ -277,8 +274,7 @@ def plot_dist(x, vals, params, mask, figdir):
 
 
 def plot_sensitivity(x, ans, params, computed, mask, figdir, variant):
-    """Plot the sensitivities.
-    """
+    """Plot the sensitivities."""
 
     getcfg = dict(fullmtxcfg=fullmtxcfg, diagapprox=diagapprox)
 
@@ -292,16 +288,16 @@ def plot_sensitivity(x, ans, params, computed, mask, figdir, variant):
             val = dset[-1]
             mval = numpy.ma.array(
                 val,
-                mask=~mask.reshape(*mask.shape, 1, 1)*numpy.ones(val.shape, dtype=bool)
+                mask=~mask.reshape(*mask.shape, 1, 1)
+                * numpy.ones(val.shape, dtype=bool),
             )
             res = val.shape[0]
             print(f"plotting {alg}-{res}x{res}-({i}, {j})")
 
-            fig = pyplot.figure(figsize=(2.5, 3.0))
+            fig = pyplot.figure(figsize=(6.5 / 3.0, 1.75))
             gs = fig.add_gridspec(1, 1)
             ax = fig.add_subplot(gs[0, 0])
             ax.contourf(x[..., 0], x[..., 1], mval[..., i, j], **ctfargs[ij])
-            ax.set_aspect("equal", adjustable="box")
             ax.set_xlabel(r"$x_1$")
             ax.set_ylabel(r"$x_2$")
             fig.colorbar(**cbarargs[ij], ax=ax)
@@ -313,15 +309,14 @@ def plot_sensitivity(x, ans, params, computed, mask, figdir, variant):
         i, j = ij
         mans = numpy.ma.array(
             ans,
-            mask=~mask.reshape(*mask.shape, 1, 1)*numpy.ones(ans.shape, dtype=bool)
+            mask=~mask.reshape(*mask.shape, 1, 1) * numpy.ones(ans.shape, dtype=bool),
         )
         print(f"plotting ans-({i}, {j})")
 
-        fig = pyplot.figure(figsize=(2.5, 3.0))
+        fig = pyplot.figure(figsize=(6.5 / 3.0, 1.75))
         gs = fig.add_gridspec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
         ax.contourf(x[..., 0], x[..., 1], mans[..., i, j], **ctfargs[ij])
-        ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel(r"$x_1$")
         ax.set_ylabel(r"$x_2$")
         fig.colorbar(**cbarargs[ij], ax=ax)
