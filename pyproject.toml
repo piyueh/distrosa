@@ -5,15 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "distrosa"
 authors = [
-  {name="Ahmed Attia", email="aattia@anl.gov"},
-  {name="Pi-Yueh Chuang", email="pchuang@anl.gov"},
-  {name="Emil Constantinescu", email="emconsta@anl.gov"},
+    { name = "Ahmed Attia", email = "aattia@anl.gov" },
+    { name = "Pi-Yueh Chuang", email = "pchuang@anl.gov" },
+    { name = "Emil Constantinescu", email = "emconsta@anl.gov" },
 ]
 description = "Distributional space-parameter sensitivity analysis"
-readme = {file="README.md", content-type ="text/markdown"}
+readme = { file = "README.md", content-type = "text/markdown" }
 license = "BSD-3-Clause"
-keywords = ["probability", "sensitivity analysis",]
-license-files = ["LICENSE",]
+keywords = ["probability", "sensitivity analysis"]
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -21,18 +21,13 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
-dynamic = ["version",]
+dynamic = ["version"]
 requires-python = ">=3.12"
-dependencies = ["torch~=2.6", "numpy>=2.1", ]
+dependencies = ["torch~=2.6", "numpy>=2.1"]
 
 [project.optional-dependencies]
-gpu = [
-    "cupy-cuda12x>=13.4"
-]
-opts = [
-    "psutil>=7.0", 
-    "matplotlib>=3.10"
-]
+gpu = ["cupy-cuda13x>=13.4"]
+opts = ["psutil>=7.0", "matplotlib>=3.10"]
 
 [project.urls]
 homepage = "https://github.com/piyueh/distrosa"

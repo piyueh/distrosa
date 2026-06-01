@@ -134,3 +134,4 @@ dmypy.json
 benchmarks/**/figs
 *.pbs
 *.pbs.o*
+uv.lock

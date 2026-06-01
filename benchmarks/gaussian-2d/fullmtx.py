@@ -5,6 +5,7 @@
 
 `params` is defined as (mu_1, mu_2, sigma_1, sigma_2, rho).
 """
+
 import time
 import itertools
 import torch
@@ -29,17 +30,16 @@ algcls = {
 
 
 def run(params, bounds, eps, nvs, algs, res):
-    """Generates figures for visualizing the sensitivities.
-    """
+    """Generates figures for visualizing the sensitivities."""
 
     # all solutions and algorithm evaluate sensitivity on this grid
     x = torch.stack(
         torch.meshgrid(
             torch.linspace(bounds[0][0], bounds[0][1], res),
             torch.linspace(bounds[1][0], bounds[1][1], res),
-            indexing="ij"
+            indexing="ij",
         ),
-        -1
+        -1,
     ).to(device)
 
     # make sure other tensors are on the same device
@@ -48,30 +48,41 @@ def run(params, bounds, eps, nvs, algs, res):
 
     outs = {}
     times = {}
-    for (nv, alg) in itertools.product(nvs, algs):
-
+    for nv, alg in itertools.product(nvs, algs):
         # background grid to discretize the distribution
         verts = [torch.linspace(_[0], _[1], nv) for _ in bounds]
 
-        # gradient/sensitivity calculator
-        grader = algcls[alg](len(params), verts, eps, gaussian_2d_pdf).to(device)
-
-        # timer
-        torch.cuda.synchronize()
-        tbg = time.perf_counter_ns()
-
-        # evaluate the sensitivity at x
+        # warm-up cycle
         with torch.inference_mode():
+            grader = algcls[alg](len(params), verts, eps, gaussian_2d_pdf)
+            grader = grader.to(device)
             out = grader(x, params)
 
-        # timer
-        torch.cuda.synchronize()
-        ted = time.perf_counter_ns()
+        # statistics over 10 repeats:
+        nruns = 10
+        ttot = 0.0
+        for _ in range(nruns):
+            # timer
+            torch.cuda.synchronize()
+            tbg = time.perf_counter_ns()
 
-        print(f"({alg}, ({nv}x{nv})), time: {(ted-tbg)/1e9} s")
+            # evaluate the sensitivity at x
+            with torch.inference_mode():
+                grader = algcls[alg](len(params), verts, eps, gaussian_2d_pdf)
+                grader = grader.to(device)
+                out = grader(x, params)
+
+            # timer
+            torch.cuda.synchronize()
+            ttot += time.perf_counter_ns() - tbg
+
+        # mean
+        ttot /= nruns
+
+        print(f"({alg}, ({nv}x{nv})), time: {ttot / 1e9} s")
 
         outs.setdefault(alg, []).append(out.cpu())
-        times.setdefault(alg, []).append((ted-tbg)/1e9)
+        times.setdefault(alg, []).append(ttot / 1e9)
 
         out = None
 
@@ -83,8 +94,7 @@ def run(params, bounds, eps, nvs, algs, res):
 
 
 def get_errors(x, ans, pdfvals, mask, computed):
-    """Calculate the errors.
-    """
+    """Calculate the errors."""
 
     print("calculating errors")
 
@@ -92,7 +102,6 @@ def get_errors(x, ans, pdfvals, mask, computed):
     conv = {}
     for alg, dset in computed.items():
         for data in dset:
-
             err = torch.abs(data - ans)  # -> (res, res, 2, 5)
             errs.setdefault(alg, []).append(err)
 
@@ -107,9 +116,8 @@ def get_errors(x, ans, pdfvals, mask, computed):
 
 
 def solution(x, params):
-    """Analytical sensitivity for the 2D Gaussian via full inverse matrix.
-    """
-    out = torch.zeros(x.shape+(5,), dtype=x.dtype, device=x.device)
+    """Analytical sensitivity for the 2D Gaussian via full inverse matrix."""
+    out = torch.zeros(x.shape + (5,), dtype=x.dtype, device=x.device)
 
     mu_1, mu_2, sigma_1, sigma_2, rho = params
 
@@ -132,15 +140,17 @@ def solution(x, params):
 
 
 def mahalanobis(x, params):
-    """Calculate if x is within the 99.9999% interval.
-    """
+    """Calculate if x is within the 99.9999% interval."""
     assert x.shape[-1] == 2
     c = 19.333908611934685
     mu = params[:2]
-    sigma = torch.tensor([
-        [params[2]**2, params[4]*params[2]*params[3]],
-        [params[4]*params[2]*params[3], params[3]**2]
-    ], device=params.device)
+    sigma = torch.tensor(
+        [
+            [params[2] ** 2, params[4] * params[2] * params[3]],
+            [params[4] * params[2] * params[3], params[3] ** 2],
+        ],
+        device=params.device,
+    )
     x = x - mu
     x = torch.einsum("...i,ij,...j->...", x, torch.linalg.inv(sigma), x)
     return x < c
@@ -166,10 +176,12 @@ if __name__ == "__main__":
     # make tensors
     params = torch.tensor([mu1, mu2, sigma1, sigma2, rho]).to(device)
 
-    bounds = torch.tensor((
-        (mu1-nsigma*sigma1, mu1+nsigma*sigma1),
-        (mu2-nsigma*sigma2, mu2+nsigma*sigma2)
-    )).to(device)
+    bounds = torch.tensor(
+        (
+            (mu1 - nsigma * sigma1, mu1 + nsigma * sigma1),
+            (mu2 - nsigma * sigma2, mu2 + nsigma * sigma2),
+        )
+    ).to(device)
 
     # all background resolutions we want to check (use the same resolution in x and y)
     nvs = torch.pow(2, torch.arange(5, 12)).tolist()
@@ -190,8 +202,20 @@ if __name__ == "__main__":
     errs, convs = get_errors(x, ans, pdfvals, mask, outs)
 
     # save to a file
-    torch.save({
-        "x": x, "ans": ans, "pdfvals": pdfvals, "nvs": nvs, "params": params.cpu(),
-        "algs": algs, "bounds": bounds.cpu(), "outs": outs, "times": times,
-        "errs": errs, "convs": convs, "mask": mask.cpu()
-    }, figdir.joinpath("fullmtx.dat"))
+    torch.save(
+        {
+            "x": x,
+            "ans": ans,
+            "pdfvals": pdfvals,
+            "nvs": nvs,
+            "params": params.cpu(),
+            "algs": algs,
+            "bounds": bounds.cpu(),
+            "outs": outs,
+            "times": times,
+            "errs": errs,
+            "convs": convs,
+            "mask": mask.cpu(),
+        },
+        figdir.joinpath("fullmtx.dat"),
+    )
